@@ -12,6 +12,15 @@ import { retrievePdf } from '../invoice/pdfStore.ts'
 
 const logger = pino({ level: 'silent' })
 
+// Per-user message queue: ensures messages from the same user are processed sequentially
+const userQueues = new Map<string, Promise<void>>()
+
+function enqueue(userId: string, fn: () => Promise<void>): void {
+  const prev = userQueues.get(userId) ?? Promise.resolve()
+  const next = prev.then(fn, fn)
+  userQueues.set(userId, next)
+}
+
 // Track active socket so we can clean up on restart/exit
 let activeSock: WASocket | null = null
 
@@ -93,26 +102,28 @@ export async function connectToWhatsApp(retryCount = 0): Promise<void> {
     const sender = msg.key.participant || from
     console.log(`[${from}] ${sender}: ${text}`)
 
-    try {
-      const reply = await processMessage(sender, text)
+    enqueue(sender, async () => {
+      try {
+        const reply = await processMessage(sender, text)
 
-      const invoiceMatch = reply.match(/INV-\d{8}-\d{3}/)
-      const pdfBuffer = invoiceMatch ? retrievePdf(invoiceMatch[0]) : undefined
+        const invoiceMatch = reply.match(/INV-\d{8}-\d{3}/)
+        const pdfBuffer = invoiceMatch ? retrievePdf(invoiceMatch[0]) : undefined
 
-      if (pdfBuffer) {
-        await sock.sendMessage(from, {
-          document: pdfBuffer,
-          mimetype: 'application/pdf',
-          fileName: `${invoiceMatch![0]}.pdf`,
-          caption: reply,
-        }, { quoted: msg })
-        console.log(`[${from}] bot: [sent PDF ${invoiceMatch![0]}]`)
-      } else {
-        await sock.sendMessage(from, { text: reply }, { quoted: msg })
-        console.log(`[${from}] bot: ${reply}`)
+        if (pdfBuffer) {
+          await sock.sendMessage(from, {
+            document: pdfBuffer,
+            mimetype: 'application/pdf',
+            fileName: `${invoiceMatch![0]}.pdf`,
+            caption: reply,
+          }, { quoted: msg })
+          console.log(`[${from}] bot: [sent PDF ${invoiceMatch![0]}]`)
+        } else {
+          await sock.sendMessage(from, { text: reply }, { quoted: msg })
+          console.log(`[${from}] bot: ${reply}`)
+        }
+      } catch (err) {
+        console.error(`Failed to process message from ${sender}:`, (err as Error).message)
       }
-    } catch (err) {
-      console.error(`Failed to process message from ${sender}:`, (err as Error).message)
-    }
+    })
   })
 }
