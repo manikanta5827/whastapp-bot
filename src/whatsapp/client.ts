@@ -2,6 +2,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
+  type WASocket,
 } from '@whiskeysockets/baileys'
 import qrcode from 'qrcode-terminal'
 import pino from 'pino'
@@ -11,16 +12,44 @@ import { retrievePdf } from '../invoice/pdfStore.ts'
 
 const logger = pino({ level: 'silent' })
 
+// Track active socket so we can clean up on restart/exit
+let activeSock: WASocket | null = null
+
+function cleanup() {
+  if (activeSock) {
+    activeSock.end(undefined)
+    activeSock = null
+  }
+}
+
+process.on('SIGTERM', cleanup)
+process.on('SIGINT', () => {
+  cleanup()
+  console.log('Shutting down...')
+  process.exit(0)
+})
+
 export async function connectToWhatsApp(retryCount = 0): Promise<void> {
+  // Close previous socket before creating a new one (prevents 440 overlap)
+  cleanup()
+
   const { version } = await fetchLatestBaileysVersion()
   const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys')
 
   const sock = makeWASocket({
     version,
     auth: state,
-    browser: ['Mac OS', 'Chrome', '14.4.1'],
+    browser: ['Ubuntu', 'Chrome', '22.04'],
     logger,
+    markOnlineOnConnect: false,
+    syncFullHistory: false,
+    keepAliveIntervalMs: 30_000,
+    connectTimeoutMs: 20_000,
+    defaultQueryTimeoutMs: 60_000,
+    retryRequestDelayMs: 2_000,
   })
+
+  activeSock = sock
 
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update
@@ -36,7 +65,9 @@ export async function connectToWhatsApp(retryCount = 0): Promise<void> {
 
       if (shouldReconnect) {
         const nextRetry = retryCount + 1
-        const delay = Math.min(1000 * 2 ** retryCount, 30_000)
+        // Longer delay for 440 (connection replaced) to let server settle
+        const baseDelay = statusCode === 440 ? 5_000 : 1_000
+        const delay = Math.min(baseDelay * 2 ** retryCount, 30_000)
         console.log(`Disconnected (${statusCode}). Reconnecting in ${delay / 1000}s... (attempt ${nextRetry})`)
         setTimeout(() => connectToWhatsApp(nextRetry), delay)
       } else {
