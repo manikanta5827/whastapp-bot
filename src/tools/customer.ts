@@ -2,7 +2,9 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { and, eq, like } from "drizzle-orm";
 import { db } from "../db/index.ts";
-import { customers, purchases } from "../db/schema.ts";
+import { users, customers, purchases } from "../db/schema.ts";
+import { generateInvoicePdf, generateBulkInvoicePdf } from "../invoice/pdf.ts";
+import { storePdf } from "../invoice/pdfStore.ts";
 
 const customerSchema = z.object({
   name: z.string().describe("Customer name"),
@@ -18,7 +20,6 @@ export const createCustomersTool = tool(
     const duplicates: string[] = [];
 
     for (const c of input.customers) {
-      // Check if a customer with the same name already exists for this user
       const existing = db
         .select()
         .from(customers)
@@ -111,26 +112,72 @@ export const deleteCustomerTool = tool(
 
     if (!customer) return "Customer not found.";
 
-    // Check if customer has purchase records
-    const purchaseCount = db
-      .select({ id: purchases.id })
+    // Get all purchases for this customer
+    const customerPurchases = db
+      .select()
       .from(purchases)
       .where(eq(purchases.customerId, input.customerId))
-      .all().length;
+      .all();
 
-    if (purchaseCount > 0) {
-      return `Cannot delete "${customer.name}" — they have ${purchaseCount} purchase record(s). Delete the purchases first or update the customer instead.`;
+    // Get seller info for PDF generation
+    const user = db.select().from(users).where(eq(users.id, input.userId)).get()!;
+    const seller = {
+      name: user.businessName!,
+      address: user.address || "",
+      gstin: user.gstin || "",
+      phone: user.businessPhone!,
+    };
+
+    // Generate one combined backup PDF before deleting
+    const backupKey = `BACKUP-${customer.name.replace(/\s+/g, "-")}-${Date.now()}`;
+
+    if (customerPurchases.length > 0) {
+      const invoices = customerPurchases.map((p) => ({
+        invoiceNumber: p.invoiceNumber,
+        date: p.date,
+        customerName: customer.name,
+        customerPhone: customer.phone || undefined,
+        customerAddress: customer.address || undefined,
+        customerGstin: customer.gstin || undefined,
+        sellerName: seller.name,
+        sellerAddress: seller.address,
+        sellerGstin: seller.gstin,
+        sellerPhone: seller.phone,
+        items: JSON.parse(p.items),
+        subtotal: p.subtotal,
+        totalGst: p.totalGst,
+        total: p.total,
+      }));
+
+      const pdfBuffer = invoices.length === 1
+        ? await generateInvoicePdf(invoices[0])
+        : await generateBulkInvoicePdf(invoices);
+      storePdf(backupKey, pdfBuffer);
+
+      // Delete purchases first, then customer
+      db.delete(purchases)
+        .where(eq(purchases.customerId, input.customerId))
+        .run();
     }
 
     db.delete(customers)
       .where(eq(customers.id, input.customerId))
       .run();
 
-    return `Customer "${customer.name}" deleted successfully.`;
+    if (customerPurchases.length > 0) {
+      return `Customer "${customer.name}" deleted along with ${customerPurchases.length} purchase record(s). Sending backup PDF with all invoices: ${backupKey}`;
+    }
+
+    return `Customer "${customer.name}" deleted. No purchase records to back up.`;
   },
   {
     name: "delete_customer",
-    description: `Delete a customer. ONLY call this AFTER the user has confirmed. Before calling, show the customer details and ask "Are you sure you want to delete this customer? Yes/No".`,
+    description: `Delete a customer and all their purchase records. ONLY call this AFTER the user has confirmed.
+Before calling, you MUST:
+1. Search for the customer
+2. Show their details and number of purchase records
+3. Warn: "This will delete the customer and X purchase records. Backup PDFs will be sent before deletion. Confirm? Yes/No"
+4. ONLY on explicit yes → call this tool`,
     schema: z.object({
       userId: z.number().describe("User ID from context"),
       customerId: z.number().describe("Customer ID to delete"),
@@ -155,16 +202,20 @@ export const searchCustomersTool = tool(
       return `No customers found matching "${input.query}". You can create a new customer.`;
     }
 
+    // Include purchase count for each customer
     if (results.length === 1) {
       const c = results[0];
-      return `Found 1 customer:\n• ID:${c.id} | ${c.name}${c.phone ? ` | Ph: ${c.phone}` : ""}${c.city ? ` | ${c.city}` : ""}${c.gstin ? ` | GSTIN: ${c.gstin}` : ""}`;
+      const pCount = db.select({ id: purchases.id }).from(purchases)
+        .where(eq(purchases.customerId, c.id)).all().length;
+      return `Found 1 customer:\n• ID:${c.id} | ${c.name}${c.phone ? ` | Ph: ${c.phone}` : ""}${c.city ? ` | ${c.city}` : ""}${c.gstin ? ` | GSTIN: ${c.gstin}` : ""} | ${pCount} purchase(s)`;
     }
 
     const list = results
-      .map(
-        (c) =>
-          `• ID:${c.id} | ${c.name}${c.phone ? ` | Ph: ${c.phone}` : ""}${c.city ? ` | ${c.city}` : ""}${c.gstin ? ` | GSTIN: ${c.gstin}` : ""}`,
-      )
+      .map((c) => {
+        const pCount = db.select({ id: purchases.id }).from(purchases)
+          .where(eq(purchases.customerId, c.id)).all().length;
+        return `• ID:${c.id} | ${c.name}${c.phone ? ` | Ph: ${c.phone}` : ""}${c.city ? ` | ${c.city}` : ""}${c.gstin ? ` | GSTIN: ${c.gstin}` : ""} | ${pCount} purchase(s)`;
+      })
       .join("\n");
 
     return `Found ${results.length} customers matching "${input.query}":\n${list}\n\nPlease specify which customer (by ID, city, or GSTIN) to avoid picking the wrong one.`;

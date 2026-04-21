@@ -106,33 +106,27 @@ export async function connectToWhatsApp(retryCount = 0): Promise<void> {
       try {
         const reply = await processMessage(sender, text)
 
-        // Find all invoice numbers in the reply (supports bulk report)
-        const invoiceMatches = reply.match(/INV-\d{8}-\d{3}/g) || []
-        const pdfs: { number: string; buffer: Buffer }[] = []
-        for (const invNum of invoiceMatches) {
-          const buf = retrievePdf(invNum)
-          if (buf) pdfs.push({ number: invNum, buffer: buf })
+        // Check for PDF keys in the reply (single invoice or bulk report)
+        const pdfKeys = reply.match(/(?:INV-\d{8}-\d{3}|REPORT-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}|BACKUP-[\w-]+-\d+)/g) || []
+        const pdfs: { key: string; buffer: Buffer }[] = []
+        for (const key of pdfKeys) {
+          const buf = retrievePdf(key)
+          if (buf) pdfs.push({ key, buffer: buf })
         }
 
-        if (pdfs.length === 1) {
-          // Single invoice — send as document with caption
-          await sock.sendMessage(from, {
-            document: pdfs[0].buffer,
-            mimetype: 'application/pdf',
-            fileName: `${pdfs[0].number}.pdf`,
-            caption: reply,
-          }, { quoted: msg })
-          console.log(`[${from}] bot: [sent PDF ${pdfs[0].number}]`)
-        } else if (pdfs.length > 1) {
-          // Bulk — send text first, then each PDF
+        if (pdfs.length > 0) {
+          // Send text first, then each PDF document
           await sock.sendMessage(from, { text: reply }, { quoted: msg })
           for (const pdf of pdfs) {
+            const fileName = pdf.key.startsWith('REPORT-')
+              ? `${pdf.key}.pdf`
+              : `${pdf.key}.pdf`
             await sock.sendMessage(from, {
               document: pdf.buffer,
               mimetype: 'application/pdf',
-              fileName: `${pdf.number}.pdf`,
+              fileName,
             })
-            console.log(`[${from}] bot: [sent PDF ${pdf.number}]`)
+            console.log(`[${from}] bot: [sent PDF ${pdf.key}]`)
           }
         } else {
           await sock.sendMessage(from, { text: reply }, { quoted: msg })

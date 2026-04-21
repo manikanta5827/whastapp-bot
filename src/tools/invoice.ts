@@ -9,7 +9,7 @@ import {
   type CustomerInfo,
 } from "../invoice/generator.ts";
 import { formatInvoiceForWhatsApp } from "../invoice/formatter.ts";
-import { generateInvoicePdf } from "../invoice/pdf.ts";
+import { generateInvoicePdf, generateBulkInvoicePdf } from "../invoice/pdf.ts";
 import { storePdf } from "../invoice/pdfStore.ts";
 import { storePending, retrievePending } from "../invoice/pendingStore.ts";
 
@@ -174,31 +174,36 @@ export const generateInvoicePdfsTool = tool(
       return "No sales found for the given period.";
     }
 
-    const invoiceNumbers: string[] = [];
-    for (const row of rows) {
-      const invoice = {
-        invoiceNumber: row.invoiceNumber,
-        date: row.date,
-        customerName: row.customerName,
-        customerPhone: row.customerPhone || undefined,
-        customerAddress: row.customerAddress || undefined,
-        customerGstin: row.customerGstin || undefined,
-        sellerName: seller.name,
-        sellerAddress: seller.address,
-        sellerGstin: seller.gstin,
-        sellerPhone: seller.phone,
-        items: JSON.parse(row.items),
-        subtotal: row.subtotal,
-        totalGst: row.totalGst,
-        total: row.total,
-      };
+    // Build invoice objects
+    const invoices = rows.map((row) => ({
+      invoiceNumber: row.invoiceNumber,
+      date: row.date,
+      customerName: row.customerName,
+      customerPhone: row.customerPhone || undefined,
+      customerAddress: row.customerAddress || undefined,
+      customerGstin: row.customerGstin || undefined,
+      sellerName: seller.name,
+      sellerAddress: seller.address,
+      sellerGstin: seller.gstin,
+      sellerPhone: seller.phone,
+      items: JSON.parse(row.items),
+      subtotal: row.subtotal,
+      totalGst: row.totalGst,
+      total: row.total,
+    }));
 
-      const pdfBuffer = await generateInvoicePdf(invoice);
-      storePdf(row.invoiceNumber, pdfBuffer);
-      invoiceNumbers.push(row.invoiceNumber);
+    // Single invoice → single PDF. Multiple → one combined PDF (one invoice per page)
+    const reportId = `REPORT-${input.fromDate}-to-${input.toDate}`;
+    if (invoices.length === 1) {
+      const pdfBuffer = await generateInvoicePdf(invoices[0]);
+      storePdf(reportId, pdfBuffer);
+    } else {
+      const pdfBuffer = await generateBulkInvoicePdf(invoices);
+      storePdf(reportId, pdfBuffer);
     }
 
-    return `Generated ${invoiceNumbers.length} invoice PDF${invoiceNumbers.length > 1 ? "s" : ""}. Invoice numbers: ${invoiceNumbers.join(", ")}`;
+    const grandTotal = invoices.reduce((sum, inv) => sum + inv.subtotal + inv.totalGst, 0);
+    return `Generated 1 PDF with ${invoices.length} invoice(s) (${input.fromDate} to ${input.toDate}). Total: ₹${grandTotal.toFixed(2)}. Report: ${reportId}`;
   },
   {
     name: "generate_invoice_pdfs",
