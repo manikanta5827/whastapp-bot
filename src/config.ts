@@ -1,5 +1,7 @@
+import "dotenv/config";
+
 export const config = {
-  openaiApiKey: Bun.env.OPENAI_API_KEY!,
+  openaiApiKey: process.env.OPENAI_API_KEY!,
   model: 'gpt-4o-mini',
 
   // Conversation history limit per user (human + AI message pairs)
@@ -7,9 +9,9 @@ export const config = {
 
   // Default seller info for invoices
   seller: {
-    name: Bun.env.SELLER_NAME || 'My Business',
-    address: Bun.env.SELLER_ADDRESS || '',
-    gstin: Bun.env.SELLER_GSTIN || '',
-    phone: Bun.env.SELLER_PHONE || '',
+    name: process.env.SELLER_NAME || 'JJ Vegetables',
+    address: process.env.SELLER_ADDRESS || 'Hyderabad',
+    gstin: process.env.SELLER_GSTIN || '36AAAAA0000A1Z5',
+    phone: process.env.SELLER_PHONE || '9876543210',
   },
 }

@@ -20,23 +20,26 @@ src/
     types.ts            ← Invoice/InvoiceItem interfaces
     generator.ts        ← invoice number generation + calculations
     formatter.ts        ← WhatsApp-friendly text formatting
+    pdf.ts              ← PDF invoice generation (pdfkit)
+    pdfStore.ts         ← in-memory buffer store for passing PDFs to sender
 ```
 
 ## Tech Stack
 
 - **Language:** TypeScript (ES modules)
-- **Runtime:** Bun (handles TS natively, auto-loads `.env`)
+- **Runtime:** Node.js + tsx (for native TS execution)
 - **WhatsApp:** `@whiskeysockets/baileys`
 - **LLM:** OpenAI via `@langchain/openai`
 - **Agent:** LangChain ReAct agent (`@langchain/langgraph`)
 - **Tool schemas:** Zod
+- **PDF:** pdfkit
 
 ## Commands
 
 ```bash
-bun run dev      # run with --watch (auto-restart on changes)
-bun run start    # run directly
-bun install      # install dependencies
+npm run dev      # run with watch mode (auto-restart on changes)
+npm run start    # run directly
+npm install      # install dependencies
 ```
 
 ## Environment
@@ -47,6 +50,7 @@ Requires `.env` with `OPENAI_API_KEY`. Optional seller config: `SELLER_NAME`, `S
 
 - Invoice tool uses Zod schema so the LLM knows exactly what fields to extract
 - Per-user conversation history capped at 20 messages in memory
-- Invoice formatter outputs WhatsApp-friendly monospace text with bold markers
+- Invoice formatter outputs WhatsApp-friendly text with bold markers
+- PDF invoices generated via pdfkit, passed to WhatsApp sender through an in-memory buffer store (keyed by invoice number, auto-deleted on retrieval)
 - GST is per-item (supports mixed rates like 5% on food, 18% on services)
 - Auth state stored in `auth_info_baileys/` (gitignored)

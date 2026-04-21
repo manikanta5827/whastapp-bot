@@ -2,6 +2,8 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { createInvoice } from "../invoice/generator.ts";
 import { formatInvoiceForWhatsApp } from "../invoice/formatter.ts";
+import { generateInvoicePdf } from "../invoice/pdf.ts";
+import { storePdf } from "../invoice/pdfStore.ts";
 
 const invoiceItemSchema = z.object({
   description: z
@@ -27,6 +29,9 @@ export const createInvoiceTool = tool(
       input.items,
       input.customerPhone,
     );
+
+    const pdfBuffer = await generateInvoicePdf(invoice);
+    storePdf(invoice.invoiceNumber, pdfBuffer);
 
     const formatted = formatInvoiceForWhatsApp(invoice);
 

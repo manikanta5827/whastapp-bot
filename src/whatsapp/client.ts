@@ -7,6 +7,7 @@ import qrcode from 'qrcode-terminal'
 import pino from 'pino'
 import { extractText, isProtocolMessage } from './utils.ts'
 import { processMessage } from '../agent/index.ts'
+import { retrievePdf } from '../invoice/pdfStore.ts'
 
 const logger = pino({ level: 'silent' })
 
@@ -63,8 +64,22 @@ export async function connectToWhatsApp(retryCount = 0): Promise<void> {
 
     try {
       const reply = await processMessage(sender, text)
-      await sock.sendMessage(from, { text: reply }, { quoted: msg })
-      console.log(`[${from}] bot: ${reply}`)
+
+      const invoiceMatch = reply.match(/INV-\d{8}-\d{3}/)
+      const pdfBuffer = invoiceMatch ? retrievePdf(invoiceMatch[0]) : undefined
+
+      if (pdfBuffer) {
+        await sock.sendMessage(from, {
+          document: pdfBuffer,
+          mimetype: 'application/pdf',
+          fileName: `${invoiceMatch![0]}.pdf`,
+          caption: reply,
+        }, { quoted: msg })
+        console.log(`[${from}] bot: [sent PDF ${invoiceMatch![0]}]`)
+      } else {
+        await sock.sendMessage(from, { text: reply }, { quoted: msg })
+        console.log(`[${from}] bot: ${reply}`)
+      }
     } catch (err) {
       console.error(`Failed to process message from ${sender}:`, (err as Error).message)
     }
