@@ -15,6 +15,20 @@
       "when": 1776773535952,
       "tag": "0001_normal_lady_deathstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1776781094816,
+      "tag": "0002_handy_micromax",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1776785425184,
+      "tag": "0003_unusual_bushwacker",
+      "breakpoints": true
     }
   ]
 }

@@ -4,6 +4,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as schema from "./schema.ts";
 
 const sqlite = new Database("bot.db");
+sqlite.pragma("foreign_keys = ON");
 export const db = drizzle({ client: sqlite, schema });
 
 // Run migrations on startup

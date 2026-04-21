@@ -1,15 +1,16 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { and, eq, between, inArray } from "drizzle-orm";
+import { and, eq, between, inArray, lt, sql } from "drizzle-orm";
 import { db } from "../db/index.ts";
-import { users, customers, purchases } from "../db/schema.ts";
+import { users, customers, purchases, payments } from "../db/schema.ts";
 import {
   createInvoice,
   type SellerInfo,
   type CustomerInfo,
 } from "../invoice/generator.ts";
 import { formatInvoiceForWhatsApp } from "../invoice/formatter.ts";
-import { generateInvoicePdf, generateBulkInvoicePdf } from "../invoice/pdf.ts";
+import { generateInvoicePdf } from "../invoice/pdf.ts";
+import { generateReportPdf, type CustomerReport } from "../invoice/report.ts";
 import { storePdf } from "../invoice/pdfStore.ts";
 import { storePending, retrievePending } from "../invoice/pendingStore.ts";
 
@@ -140,82 +141,168 @@ export const confirmInvoiceTool = tool(
   },
 );
 
-export const generateInvoicePdfsTool = tool(
+export const generateReportTool = tool(
   async (input) => {
     const seller = getSellerInfo(input.userId);
 
-    const rows = db
-      .select({
-        invoiceNumber: purchases.invoiceNumber,
-        customerName: customers.name,
-        customerPhone: customers.phone,
-        customerAddress: customers.address,
-        customerGstin: customers.gstin,
-        items: purchases.items,
-        subtotal: purchases.subtotal,
-        totalGst: purchases.totalGst,
-        total: purchases.total,
-        date: purchases.date,
-      })
-      .from(purchases)
-      .innerJoin(customers, eq(purchases.customerId, customers.id))
-      .where(
-        and(
-          eq(purchases.userId, input.userId),
-          between(purchases.date, input.fromDate, input.toDate),
-          ...(input.customerIds?.length
-            ? [inArray(purchases.customerId, input.customerIds)]
-            : []),
-        ),
-      )
-      .all();
+    // Determine which customers to include
+    let customerRows;
+    if (input.customerIds?.length) {
+      customerRows = db
+        .select()
+        .from(customers)
+        .where(
+          and(
+            eq(customers.userId, input.userId),
+            inArray(customers.id, input.customerIds),
+          ),
+        )
+        .all();
+    } else {
+      // All customers who have sales OR payments in the date range
+      const salesCustomerIds = db
+        .select({ id: purchases.customerId })
+        .from(purchases)
+        .where(
+          and(
+            eq(purchases.userId, input.userId),
+            between(purchases.date, input.fromDate, input.toDate),
+          ),
+        )
+        .all()
+        .map((r) => r.id);
 
-    if (rows.length === 0) {
-      return "No sales found for the given period.";
+      const paymentCustomerIds = db
+        .select({ id: payments.customerId })
+        .from(payments)
+        .where(
+          and(
+            eq(payments.userId, input.userId),
+            between(payments.date, input.fromDate, input.toDate),
+          ),
+        )
+        .all()
+        .map((r) => r.id);
+
+      const uniqueIds = [...new Set([...salesCustomerIds, ...paymentCustomerIds])];
+      if (uniqueIds.length === 0) {
+        return "No sales or payments found for the given period.";
+      }
+
+      customerRows = db
+        .select()
+        .from(customers)
+        .where(inArray(customers.id, uniqueIds))
+        .all();
     }
 
-    // Build invoice objects
-    const invoices = rows.map((row) => ({
-      invoiceNumber: row.invoiceNumber,
-      date: row.date,
-      customerName: row.customerName,
-      customerPhone: row.customerPhone || undefined,
-      customerAddress: row.customerAddress || undefined,
-      customerGstin: row.customerGstin || undefined,
+    if (customerRows.length === 0) {
+      return "No customers found.";
+    }
+
+    // Build report for each customer
+    const customerReports: CustomerReport[] = [];
+
+    for (const c of customerRows) {
+      // Opening balance = initial + sales before fromDate - payments before fromDate
+      const salesBefore = db
+        .select({ total: sql<number>`COALESCE(SUM(${purchases.total}), 0)` })
+        .from(purchases)
+        .where(and(eq(purchases.customerId, c.id), lt(purchases.date, input.fromDate)))
+        .get()!.total;
+
+      const paymentsBefore = db
+        .select({ total: sql<number>`COALESCE(SUM(${payments.amount}), 0)` })
+        .from(payments)
+        .where(and(eq(payments.customerId, c.id), lt(payments.date, input.fromDate)))
+        .get()!.total;
+
+      const openingBalance = c.initialBalance + salesBefore - paymentsBefore;
+
+      // Sales in range
+      const salesInRange = db
+        .select()
+        .from(purchases)
+        .where(
+          and(
+            eq(purchases.customerId, c.id),
+            between(purchases.date, input.fromDate, input.toDate),
+          ),
+        )
+        .all();
+
+      const totalSales = salesInRange.reduce((sum, s) => sum + s.total, 0);
+
+      // Payments in range
+      const paymentsInRange = db
+        .select()
+        .from(payments)
+        .where(
+          and(
+            eq(payments.customerId, c.id),
+            between(payments.date, input.fromDate, input.toDate),
+          ),
+        )
+        .all();
+
+      const totalPayments = paymentsInRange.reduce((sum, p) => sum + p.amount, 0);
+
+      const closingBalance = openingBalance + totalSales - totalPayments;
+
+      customerReports.push({
+        customerName: c.name,
+        customerPhone: c.phone || undefined,
+        customerCity: c.city || undefined,
+        openingBalance,
+        sales: salesInRange.map((s) => ({
+          invoiceNumber: s.invoiceNumber,
+          date: s.date,
+          items: JSON.parse(s.items),
+          total: s.total,
+        })),
+        payments: paymentsInRange.map((p) => ({
+          date: p.date,
+          amount: p.amount,
+          mode: p.mode,
+          note: p.note,
+        })),
+        totalSales,
+        totalPayments,
+        closingBalance,
+      });
+    }
+
+    const reportId = `REPORT-${input.fromDate}-to-${input.toDate}`;
+    const pdfBuffer = await generateReportPdf({
       sellerName: seller.name,
       sellerAddress: seller.address,
       sellerGstin: seller.gstin,
       sellerPhone: seller.phone,
-      items: JSON.parse(row.items),
-      subtotal: row.subtotal,
-      totalGst: row.totalGst,
-      total: row.total,
-    }));
+      fromDate: input.fromDate,
+      toDate: input.toDate,
+      customers: customerReports,
+    });
 
-    // Single invoice → single PDF. Multiple → one combined PDF (one invoice per page)
-    const reportId = `REPORT-${input.fromDate}-to-${input.toDate}`;
-    if (invoices.length === 1) {
-      const pdfBuffer = await generateInvoicePdf(invoices[0]);
-      storePdf(reportId, pdfBuffer);
-    } else {
-      const pdfBuffer = await generateBulkInvoicePdf(invoices);
-      storePdf(reportId, pdfBuffer);
-    }
+    storePdf(reportId, pdfBuffer);
 
-    const grandTotal = invoices.reduce((sum, inv) => sum + inv.subtotal + inv.totalGst, 0);
-    return `Generated 1 PDF with ${invoices.length} invoice(s) (${input.fromDate} to ${input.toDate}). Total: ₹${grandTotal.toFixed(2)}. Report: ${reportId}`;
+    const summaryLines = customerReports.map(
+      (c) => `• ${c.customerName}: Sales ₹${c.totalSales.toFixed(2)}, Payments ₹${c.totalPayments.toFixed(2)}, Balance ₹${c.closingBalance.toFixed(2)}${c.closingBalance > 0 ? " (owes)" : c.closingBalance < 0 ? " (advance)" : " (settled)"}`,
+    );
+
+    return `Report generated (${input.fromDate} to ${input.toDate}), ${customerReports.length} customer(s):\n${summaryLines.join("\n")}\n\nReport: ${reportId}`;
   },
   {
-    name: "generate_invoice_pdfs",
-    description: `Generate and send invoice PDFs for recorded sales in a date range. Optionally filter by customer IDs.
-BEFORE calling this, if the user mentions specific customer names:
-1. Call search_customers for each name
-2. If multiple matches for a name, ask user to pick
-3. If no match, tell user that customer was not found
-4. Collect the resolved customer IDs, then call this tool
+    name: "generate_report",
+    description: `Generate an account statement PDF with sales, payments, and balance for a date range.
+Shows per-customer: opening balance, sales list, payments list, closing balance.
 
-If no customer names mentioned (e.g. "send all invoices for today"), pass no customerIds to get ALL sales in the date range.
-No confirmation needed — these are already-confirmed sales.`,
+BEFORE calling, if user mentions specific customer names:
+1. Call search_customers for each name
+2. If multiple matches, ask user to pick
+3. Collect resolved customer IDs
+
+If no customer names mentioned (e.g. "send report for today"), pass no customerIds — includes all customers with activity in the range.
+No confirmation needed.`,
     schema: z.object({
       userId: z.number().describe("User ID from context"),
       fromDate: z.string().describe("Start date YYYY-MM-DD"),

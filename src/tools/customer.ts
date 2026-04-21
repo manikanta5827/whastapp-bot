@@ -2,7 +2,7 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { and, eq, like } from "drizzle-orm";
 import { db } from "../db/index.ts";
-import { users, customers, purchases } from "../db/schema.ts";
+import { users, customers, purchases, payments } from "../db/schema.ts";
 import { generateInvoicePdf, generateBulkInvoicePdf } from "../invoice/pdf.ts";
 import { storePdf } from "../invoice/pdfStore.ts";
 
@@ -12,6 +12,11 @@ const customerSchema = z.object({
   address: z.string().optional().describe("Customer address"),
   city: z.string().optional().describe("Customer city"),
   gstin: z.string().optional().describe("Customer GST number"),
+  initialBalance: z
+    .number()
+    .optional()
+    .default(0)
+    .describe("Opening balance (amount customer already owes). Default 0."),
 });
 
 export const createCustomersTool = tool(
@@ -39,6 +44,7 @@ export const createCustomersTool = tool(
           address: c.address,
           city: c.city,
           gstin: c.gstin,
+          initialBalance: c.initialBalance ?? 0,
         })
         .run();
       added.push(c.name);
@@ -128,7 +134,7 @@ export const deleteCustomerTool = tool(
       phone: user.businessPhone!,
     };
 
-    // Generate one combined backup PDF before deleting
+    // Generate backup PDF before deleting
     const backupKey = `BACKUP-${customer.name.replace(/\s+/g, "-")}-${Date.now()}`;
 
     if (customerPurchases.length > 0) {
@@ -153,13 +159,9 @@ export const deleteCustomerTool = tool(
         ? await generateInvoicePdf(invoices[0])
         : await generateBulkInvoicePdf(invoices);
       storePdf(backupKey, pdfBuffer);
-
-      // Delete purchases first, then customer
-      db.delete(purchases)
-        .where(eq(purchases.customerId, input.customerId))
-        .run();
     }
 
+    // Cascade deletes purchases + payments automatically
     db.delete(customers)
       .where(eq(customers.id, input.customerId))
       .run();

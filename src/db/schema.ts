@@ -4,6 +4,7 @@ import { sql, type InferSelectModel } from "drizzle-orm";
 export type User = InferSelectModel<typeof users>;
 export type Customer = InferSelectModel<typeof customers>;
 export type Purchase = InferSelectModel<typeof purchases>;
+export type Payment = InferSelectModel<typeof payments>;
 
 export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -29,6 +30,7 @@ export const customers = sqliteTable("customers", {
   address: text("address"),
   city: text("city"),
   gstin: text("gstin"),
+  initialBalance: real("initial_balance").notNull().default(0),
   createdAt: text("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
@@ -42,12 +44,29 @@ export const purchases = sqliteTable("purchases", {
     .references(() => users.id),
   customerId: integer("customer_id")
     .notNull()
-    .references(() => customers.id),
-  items: text("items").notNull(), // JSON string
+    .references(() => customers.id, { onDelete: "cascade" }),
+  items: text("items").notNull(),
   subtotal: real("subtotal").notNull(),
   totalGst: real("total_gst").notNull(),
   total: real("total").notNull(),
-  date: text("date").notNull(), // YYYY-MM-DD for easy range queries
+  date: text("date").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const payments = sqliteTable("payments", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => users.id),
+  customerId: integer("customer_id")
+    .notNull()
+    .references(() => customers.id, { onDelete: "cascade" }),
+  amount: real("amount").notNull(),
+  mode: text("mode"),
+  note: text("note"),
+  date: text("date").notNull(),
   createdAt: text("created_at")
     .notNull()
     .default(sql`CURRENT_TIMESTAMP`),
