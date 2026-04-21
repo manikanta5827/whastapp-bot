@@ -34,13 +34,15 @@ export async function connectToWhatsApp(retryCount = 0): Promise<void> {
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut
 
       if (shouldReconnect) {
+        const nextRetry = retryCount + 1
         const delay = Math.min(1000 * 2 ** retryCount, 30_000)
-        console.log(`Disconnected (${statusCode}). Reconnecting in ${delay / 1000}s...`)
-        setTimeout(() => connectToWhatsApp(retryCount + 1), delay)
+        console.log(`Disconnected (${statusCode}). Reconnecting in ${delay / 1000}s... (attempt ${nextRetry})`)
+        setTimeout(() => connectToWhatsApp(nextRetry), delay)
       } else {
-        console.log('Logged out.')
+        console.log('Logged out. Delete auth_info_baileys/ and restart to re-authenticate.')
       }
     } else if (connection === 'open') {
+      retryCount = 0
       console.log('Connected to WhatsApp.')
     }
   })

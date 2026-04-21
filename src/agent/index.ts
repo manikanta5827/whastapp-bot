@@ -1,17 +1,22 @@
-import OpenAI from "openai";
-import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { ChatOpenAI } from "@langchain/openai";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { config } from "../config.ts";
 import { getHistory, updateHistory } from "./history.ts";
-import {
-  createInvoiceDefinition,
-  executeCreateInvoice,
-} from "../tools/invoice.ts";
+import { createInvoiceTool } from "../tools/invoice.ts";
 
-const openai = new OpenAI({ apiKey: config.openaiApiKey });
+const llm = new ChatOpenAI({
+  model: config.model,
+  apiKey: config.openaiApiKey,
+});
 
-const SYSTEM_PROMPT: ChatCompletionMessageParam = {
-  role: "system",
-  content: `You are a helpful WhatsApp invoice assistant for Indian businesses.
+const tools = [createInvoiceTool];
+
+const agent = createReactAgent({
+  llm,
+  tools,
+  stateModifier: new SystemMessage(
+    `You are a helpful WhatsApp invoice assistant for Indian businesses.
 Your primary job is to help users create invoices for their customers.
 
 When a user asks to create an invoice or bill someone:
@@ -26,64 +31,29 @@ If GST is not mentioned, use 0%.
 
 Be concise — responses are read on a phone.
 If the user asks something unrelated to invoices, help them briefly but guide them back to invoice creation.`,
-};
-
-const tools = [createInvoiceDefinition];
-
-const toolExecutors: Record<string, (args: any) => string> = {
-  create_invoice: executeCreateInvoice,
-};
+  ),
+});
 
 export async function processMessage(
   userId: string,
   text: string,
 ): Promise<string> {
   const history = getHistory(userId);
-  const messages: ChatCompletionMessageParam[] = [
-    SYSTEM_PROMPT,
-    ...history,
-    { role: "user", content: text },
-  ];
 
-  // Tool-call loop: keep calling until we get a text response
-  while (true) {
-    const response = await openai.chat.completions.create({
-      model: config.model,
-      messages,
-      tools,
-    });
+  const result = await agent.invoke({
+    messages: [...history, new HumanMessage(text)],
+  });
 
-    const choice = response.choices[0];
-    const message = choice.message;
+  const aiMessages = result.messages.filter(
+    (m: any) => m._getType() === "ai" && !m.tool_calls?.length,
+  );
+  const lastAI = aiMessages.at(-1);
+  const responseText =
+    typeof lastAI?.content === "string"
+      ? lastAI.content
+      : ((lastAI?.content as any[])?.find((c: any) => c.type === "text")
+          ?.text ?? "Sorry, I could not generate a response.");
 
-    // No tool calls — we have our final text response
-    if (!message.tool_calls?.length) {
-      const responseText =
-        message.content ?? "Sorry, I could not generate a response.";
-      updateHistory(userId, text, responseText);
-      return responseText;
-    }
-
-    // Add assistant message with tool calls to context
-    messages.push(message);
-
-    // Execute each tool call and add results
-    for (const toolCall of message.tool_calls) {
-      const executor = toolExecutors[toolCall.function.name];
-      let result: string;
-
-      if (executor) {
-        const args = JSON.parse(toolCall.function.arguments);
-        result = executor(args);
-      } else {
-        result = `Unknown tool: ${toolCall.function.name}`;
-      }
-
-      messages.push({
-        role: "tool",
-        tool_call_id: toolCall.id,
-        content: result,
-      });
-    }
-  }
+  updateHistory(userId, text, responseText);
+  return responseText;
 }

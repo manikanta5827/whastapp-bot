@@ -10,87 +10,58 @@ function formatCurrency(amount: number): string {
   );
 }
 
-function pad(text: string, width: number): string {
-  return text.length >= width ? text : text + " ".repeat(width - text.length);
-}
-
-function padLeft(text: string, width: number): string {
-  return text.length >= width ? text : " ".repeat(width - text.length) + text;
-}
-
 export function formatInvoiceForWhatsApp(invoice: Invoice): string {
   const lines: string[] = [];
 
-  lines.push("━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  lines.push("           *INVOICE*");
-  lines.push("━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  // Header
+  lines.push("📄 *INVOICE*");
   lines.push("");
 
   // Seller info
   if (invoice.sellerName) {
     lines.push(`*From:* ${invoice.sellerName}`);
   }
-  if (invoice.sellerAddress) {
-    lines.push(invoice.sellerAddress);
-  }
-  if (invoice.sellerGstin) {
-    lines.push(`GSTIN: ${invoice.sellerGstin}`);
-  }
-  lines.push("");
+  if (invoice.sellerAddress) lines.push(invoice.sellerAddress);
+  if (invoice.sellerGstin) lines.push(`GSTIN: ${invoice.sellerGstin}`);
 
-  // Invoice details
-  lines.push(`*Invoice #:* ${invoice.invoiceNumber}`);
+  lines.push("");
+  lines.push(`*Invoice:* ${invoice.invoiceNumber}`);
   lines.push(`*Date:* ${invoice.date}`);
-  lines.push("");
 
-  // Customer info
+  // Customer
+  lines.push("");
   lines.push(`*Bill To:* ${invoice.customerName}`);
-  if (invoice.customerPhone) {
-    lines.push(`Phone: ${invoice.customerPhone}`);
-  }
+  if (invoice.customerPhone) lines.push(`Phone: ${invoice.customerPhone}`);
+
+  // Items — one block per item, no column alignment
   lines.push("");
+  lines.push("▸ *Items*");
+  lines.push("─────────────────");
 
-  // Items header
-  lines.push("─────────────────────────────");
-  lines.push(
-    `${pad("Item", 16)} ${padLeft("Qty", 6)} ${padLeft("Rate", 8)} ${padLeft("Amount", 10)}`,
-  );
-  lines.push("─────────────────────────────");
-
-  // Items
-  for (const item of invoice.items) {
+  for (let i = 0; i < invoice.items.length; i++) {
+    const item = invoice.items[i];
     const amount = item.quantity * item.rate;
-    const desc =
-      item.description.length > 15
-        ? item.description.slice(0, 14) + "…"
-        : item.description;
 
     lines.push(
-      `${pad(desc, 16)} ${padLeft(item.quantity + item.unit, 6)} ${padLeft(formatCurrency(item.rate), 8)} ${padLeft(formatCurrency(amount), 10)}`,
+      `${i + 1}. ${item.description}`,
+    );
+    lines.push(
+      `    ${item.quantity} ${item.unit} × ${formatCurrency(item.rate)} = ${formatCurrency(amount)}`,
     );
 
     if (item.gstPercent > 0) {
       const gstAmount = (amount * item.gstPercent) / 100;
-      lines.push(`  _GST ${item.gstPercent}%: ${formatCurrency(gstAmount)}_`);
+      lines.push(`    _+ GST ${item.gstPercent}%: ${formatCurrency(gstAmount)}_`);
     }
   }
 
-  lines.push("─────────────────────────────");
-
   // Totals
-  lines.push(
-    `${pad("", 16)} ${padLeft("Subtotal:", 14)} ${padLeft(formatCurrency(invoice.subtotal), 10)}`,
-  );
+  lines.push("─────────────────");
+  lines.push(`Subtotal: ${formatCurrency(invoice.subtotal)}`);
   if (invoice.totalGst > 0) {
-    lines.push(
-      `${pad("", 16)} ${padLeft("GST:", 14)} ${padLeft(formatCurrency(invoice.totalGst), 10)}`,
-    );
+    lines.push(`GST: ${formatCurrency(invoice.totalGst)}`);
   }
-  lines.push("─────────────────────────────");
-  lines.push(
-    `${pad("", 16)} *${padLeft("TOTAL:", 13)} ${padLeft(formatCurrency(invoice.total), 10)}*`,
-  );
-  lines.push("━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  lines.push(`*Total: ${formatCurrency(invoice.total)}*`);
 
   return lines.join("\n");
 }
