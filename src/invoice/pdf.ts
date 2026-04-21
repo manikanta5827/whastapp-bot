@@ -1,205 +1,151 @@
 import type { Invoice } from "./types.ts";
 import {
-  LEFT_X,
   ROW_HEIGHT,
   formatCurrencyPdf as fmt,
-  getRightX,
-  getPageWidth,
-  getPageBottom,
   docToBuffer,
 } from "./pdfHelpers.ts";
 
-function getCols() {
-  return {
-    sno: LEFT_X,
-    desc: LEFT_X + 35,
-    qty: LEFT_X + 220,
-    unit: LEFT_X + 270,
-    rate: LEFT_X + 310,
-    gst: LEFT_X + 390,
-    amount: LEFT_X + 430,
-  };
+const MARGIN = 50;
+const BLACK = "#000000";
+
+function getRight(doc: PDFKit.PDFDocument) {
+  return doc.page.width - MARGIN;
 }
 
-function drawTableHeader(doc: PDFKit.PDFDocument, y: number): number {
-  const cols = getCols();
-
-  doc.rect(LEFT_X, y, getPageWidth(doc), 20).fill("#f0f0f0");
-  doc.fillColor("#000000").fontSize(9).font("Helvetica-Bold");
-  y += 5;
-  doc.text("#", cols.sno, y, { width: 30 });
-  doc.text("Description", cols.desc, y, { width: 180 });
-  doc.text("Qty", cols.qty, y, { width: 45, align: "right" });
-  doc.text("Unit", cols.unit, y, { width: 35, align: "center" });
-  doc.text("Rate", cols.rate, y, { width: 75, align: "right" });
-  doc.text("GST%", cols.gst, y, { width: 35, align: "right" });
-  doc.text("Amount", cols.amount, y, { width: 65, align: "right" });
-  y += 20;
-
-  return y;
+function getWidth(doc: PDFKit.PDFDocument) {
+  return doc.page.width - MARGIN * 2;
 }
 
-function drawContinuationHeader(
+function getBottom(doc: PDFKit.PDFDocument) {
+  return doc.page.height - MARGIN;
+}
+
+function drawLine(
   doc: PDFKit.PDFDocument,
-  invoice: Invoice,
-): number {
-  const rightX = getRightX(doc);
-  let y = 50;
-
-  doc.fontSize(9).font("Helvetica").fillColor("#666666");
-  doc.text(
-    `${invoice.invoiceNumber} — ${invoice.customerName} (continued)`,
-    LEFT_X,
-    y,
-  );
-  y += 16;
-
+  y: number,
+  dashed = false,
+  width = 0.5,
+) {
+  if (dashed) {
+    doc.dash(2, { space: 2 });
+  } else {
+    doc.undash();
+  }
   doc
-    .moveTo(LEFT_X, y)
-    .lineTo(rightX, y)
-    .lineWidth(0.5)
-    .strokeColor("#cccccc")
+    .moveTo(MARGIN, y)
+    .lineTo(getRight(doc), y)
+    .lineWidth(width)
+    .strokeColor(BLACK)
     .stroke();
-  doc.strokeColor("#000000").fillColor("#000000");
-  y += 10;
-
-  return y;
+  doc.undash();
 }
 
 function renderInvoice(doc: PDFKit.PDFDocument, invoice: Invoice): void {
-  const rightX = getRightX(doc);
-  const pageBottom = getPageBottom(doc);
+  const rightX = getRight(doc);
+  const pageWidth = getWidth(doc);
+  const pageBottom = getBottom(doc);
+  let y = MARGIN;
 
-  // --- Header ---
-  doc
-    .fontSize(22)
-    .font("Helvetica-Bold")
-    .text("TAX INVOICE", LEFT_X, 50, { align: "center" });
+  // ── Header: Title ──
+  doc.fontSize(18).font("Courier-Bold").fillColor(BLACK);
+  doc.text("Invoice", MARGIN, y);
+  y += 25;
 
-  doc.moveTo(LEFT_X, 80).lineTo(rightX, 80).lineWidth(2).stroke();
-
-  // --- Seller Info (left) + Invoice Meta (right) ---
-  let y = 95;
-
-  doc.fontSize(12).font("Helvetica-Bold").text(invoice.sellerName, LEFT_X, y);
-  y += 16;
-  doc.fontSize(9).font("Helvetica");
-  if (invoice.sellerAddress) {
-    doc.text(invoice.sellerAddress, LEFT_X, y);
-    y += 13;
-  }
-  if (invoice.sellerGstin) {
-    doc.text(`GSTIN: ${invoice.sellerGstin}`, LEFT_X, y);
-    y += 13;
-  }
-  if (invoice.sellerPhone) {
-    doc.text(`Phone: ${invoice.sellerPhone}`, LEFT_X, y);
-    y += 13;
-  }
-
-  doc
-    .fontSize(10)
-    .font("Helvetica-Bold")
-    .text(`Invoice: ${invoice.invoiceNumber}`, 350, 95, { align: "right" });
-  doc
-    .fontSize(10)
-    .font("Helvetica")
-    .text(`Date: ${invoice.date}`, 350, 111, { align: "right" });
-
-  // --- Customer Info ---
-  y = Math.max(y, 130) + 10;
-  doc.moveTo(LEFT_X, y).lineTo(rightX, y).lineWidth(0.5).stroke();
+  drawLine(doc, y, true);
   y += 10;
 
-  doc.fontSize(10).font("Helvetica-Bold").text("Bill To:", LEFT_X, y);
-  y += 14;
-  doc.fontSize(10).font("Helvetica").text(invoice.customerName, LEFT_X, y);
-  y += 14;
-  if (invoice.customerPhone) {
-    doc.text(`Phone: ${invoice.customerPhone}`, LEFT_X, y);
-    y += 14;
-  }
-  if (invoice.customerAddress) {
-    doc.text(invoice.customerAddress, LEFT_X, y);
-    y += 14;
-  }
-  if (invoice.customerGstin) {
-    doc.text(`GSTIN: ${invoice.customerGstin}`, LEFT_X, y);
-    y += 14;
-  }
+  // ── Customer Name ──
+  doc.fontSize(14).font("Courier-Bold").text(`Name: ${invoice.customerName}`, MARGIN, y);
+  y += 20;
 
+  drawLine(doc, y);
   y += 10;
 
-  // --- Items Table ---
-  const cols = getCols();
-  y = drawTableHeader(doc, y);
+  // ── Billing Info (Columns) ──
+  const colWidth = pageWidth / 2;
+  doc.fontSize(11).font("Courier-Bold");
+  
+  doc.text(`Bill No: ${invoice.invoiceNumber}`, MARGIN, y);
+  doc.text(`Date: ${invoice.date}`, MARGIN + colWidth, y);
+  y += 15;
+  
+  // Note: Time is not in Invoice object, so we omit or could add current time if desired.
+  // For now we follow the structure of the image as much as possible.
+  
+  y += 5;
+  drawLine(doc, y, true);
+  y += 10;
 
-  doc.font("Helvetica").fontSize(9);
+  // ── Items Table Header ──
+  doc.fontSize(11).font("Courier-Bold");
+  doc.text("Item Name", MARGIN, y);
+  y += 15;
+  doc.text("Qty x Price", MARGIN, y);
+  doc.text("Amount (Savings)", rightX - 200, y, { width: 200, align: "right" });
+  y += 12;
+
+  drawLine(doc, y, true);
+  y += 10;
+
+  // ── Table Rows ──
   for (let i = 0; i < invoice.items.length; i++) {
-    if (y + ROW_HEIGHT > pageBottom) {
+    if (y + 50 > pageBottom) {
       doc.addPage();
-      y = drawContinuationHeader(doc, invoice);
-      y = drawTableHeader(doc, y);
-      doc.font("Helvetica").fontSize(9);
+      y = MARGIN;
     }
 
     const item = invoice.items[i];
     const amount = item.quantity * item.rate;
 
-    if (i % 2 === 1) {
-      doc.rect(LEFT_X, y - 3, getPageWidth(doc), ROW_HEIGHT).fill("#fafafa");
-      doc.fillColor("#000000");
-    }
+    // Item Name in Bold/Large
+    doc.fontSize(13).font("Courier-Bold").text(item.description, MARGIN, y);
+    y += 15;
 
-    doc.text(`${i + 1}`, cols.sno, y, { width: 30 });
-    doc.text(item.description, cols.desc, y, { width: 180 });
-    doc.text(`${item.quantity}`, cols.qty, y, { width: 45, align: "right" });
-    doc.text(item.unit, cols.unit, y, { width: 35, align: "center" });
-    doc.text(fmt(item.rate), cols.rate, y, { width: 75, align: "right" });
-    doc.text(`${item.gstPercent}%`, cols.gst, y, { width: 35, align: "right" });
-    doc.text(fmt(amount), cols.amount, y, { width: 65, align: "right" });
-    y += ROW_HEIGHT;
+    // Qty x Price
+    doc.fontSize(11).font("Courier");
+    doc.text(`${item.quantity}(PCS) x ${item.rate.toFixed(2)}`, MARGIN, y);
+    
+    // Amount
+    doc.text(`${amount.toFixed(2)}`, rightX - 100, y, { width: 100, align: "right" });
+    y += 15;
+
+    drawLine(doc, y, true);
+    y += 8;
   }
 
-  // --- Totals ---
-  const totalsHeight = 60 + (invoice.totalGst > 0 ? 16 : 0);
-  if (y + totalsHeight > pageBottom) {
-    doc.addPage();
-    y = drawContinuationHeader(doc, invoice);
-  }
+  // ── Totals ──
+  y += 10;
+  const labelX = rightX - 300;
+  const valueX = rightX - 120;
+  const valueW = 120;
 
-  y += 5;
-  doc.moveTo(LEFT_X, y).lineTo(rightX, y).lineWidth(1).stroke();
-  y += 12;
-
-  const labelX = cols.rate;
-  const valueX = cols.amount;
-
-  doc.fontSize(10).font("Helvetica");
-  doc.text("Subtotal:", labelX, y, { width: 75, align: "right" });
-  doc.text(fmt(invoice.subtotal), valueX, y, { width: 65, align: "right" });
-  y += 16;
+  doc.fontSize(14).font("Courier-Bold");
+  
+  doc.text("Subtotal:", labelX, y, { width: 170, align: "right" });
+  doc.text(fmt(invoice.subtotal), valueX, y, { width: valueW, align: "right" });
+  y += 20;
 
   if (invoice.totalGst > 0) {
-    doc.text("GST:", labelX, y, { width: 75, align: "right" });
-    doc.text(fmt(invoice.totalGst), valueX, y, { width: 65, align: "right" });
-    y += 16;
+    doc.text("GST:", labelX, y, { width: 170, align: "right" });
+    doc.text(fmt(invoice.totalGst), valueX, y, { width: valueW, align: "right" });
+    y += 20;
   }
 
-  doc.moveTo(labelX, y).lineTo(rightX, y).lineWidth(1).stroke();
-  y += 8;
+  // Total Amount (Larger Font)
+  doc.fontSize(16).text("Total Amount:", labelX, y, { width: 170, align: "right" });
+  doc.text(fmt(invoice.total), valueX, y, { width: valueW, align: "right" });
 
-  doc.fontSize(12).font("Helvetica-Bold");
-  doc.text("Total:", labelX, y, { width: 75, align: "right" });
-  doc.text(fmt(invoice.total), valueX, y, { width: 65, align: "right" });
+  y += 25;
+  doc.fontSize(10).font("Courier").text("... THANK YOU ...", MARGIN, y, { 
+    align: "center", 
+    width: pageWidth 
+  });
 }
 
-/** Generate a single-invoice PDF */
 export async function generateInvoicePdf(invoice: Invoice): Promise<Buffer> {
   return docToBuffer((doc) => renderInvoice(doc, invoice));
 }
 
-/** Generate a combined PDF with multiple invoices (each starts on a new page) */
 export async function generateBulkInvoicePdf(
   invoices: Invoice[],
 ): Promise<Buffer> {

@@ -1,11 +1,16 @@
-const pdfBuffers = new Map<string, Buffer>();
-
-export function storePdf(invoiceNumber: string, buffer: Buffer): void {
-  pdfBuffers.set(invoiceNumber, buffer);
+interface PdfEntry {
+  buffer: Buffer;
+  label?: string;
 }
 
-export function retrievePdf(invoiceNumber: string): Buffer | undefined {
-  const buf = pdfBuffers.get(invoiceNumber);
-  if (buf) pdfBuffers.delete(invoiceNumber);
-  return buf;
+const pdfBuffers = new Map<string, PdfEntry>();
+
+export function storePdf(key: string, buffer: Buffer, label?: string): void {
+  pdfBuffers.set(key, { buffer, label });
+}
+
+export function retrievePdf(key: string): PdfEntry | undefined {
+  const entry = pdfBuffers.get(key);
+  if (entry) pdfBuffers.delete(key);
+  return entry;
 }

@@ -3,7 +3,7 @@ import { sql, type InferSelectModel } from "drizzle-orm";
 
 export type User = InferSelectModel<typeof users>;
 export type Customer = InferSelectModel<typeof customers>;
-export type Purchase = InferSelectModel<typeof purchases>;
+export type sale = InferSelectModel<typeof sales>;
 export type Payment = InferSelectModel<typeof payments>;
 
 export const users = sqliteTable("users", {
@@ -36,7 +36,7 @@ export const customers = sqliteTable("customers", {
     .default(sql`CURRENT_TIMESTAMP`),
 });
 
-export const purchases = sqliteTable("purchases", {
+export const sales = sqliteTable("sales", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   invoiceNumber: text("invoice_number").notNull(),
   userId: integer("user_id")

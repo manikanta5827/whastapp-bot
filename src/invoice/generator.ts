@@ -1,6 +1,6 @@
 import { eq, like } from "drizzle-orm";
 import { db } from "../db/index.ts";
-import { purchases } from "../db/schema.ts";
+import { sales } from "../db/schema.ts";
 import type { Invoice, InvoiceItem } from "./types.ts";
 
 function generateInvoiceNumber(): string {
@@ -10,9 +10,9 @@ function generateInvoiceNumber(): string {
 
   // Find the highest existing invoice number for today
   const latest = db
-    .select({ invoiceNumber: purchases.invoiceNumber })
-    .from(purchases)
-    .where(like(purchases.invoiceNumber, `${prefix}%`))
+    .select({ invoiceNumber: sales.invoiceNumber })
+    .from(sales)
+    .where(like(sales.invoiceNumber, `${prefix}%`))
     .all();
 
   let maxSeq = 0;

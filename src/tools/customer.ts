@@ -2,7 +2,7 @@ import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { and, eq, like } from "drizzle-orm";
 import { db } from "../db/index.ts";
-import { users, customers, purchases, payments } from "../db/schema.ts";
+import { users, customers, sales, payments } from "../db/schema.ts";
 import { generateInvoicePdf, generateBulkInvoicePdf } from "../invoice/pdf.ts";
 import { storePdf } from "../invoice/pdfStore.ts";
 import logger from "../logger.ts";
@@ -22,7 +22,11 @@ const customerSchema = z.object({
 
 export const createCustomersTool = tool(
   async (input) => {
-    logger.info("create_customers called", { userId: input.userId, count: input.customers.length, names: input.customers.map(c => c.name) });
+    logger.info("create_customers called", {
+      userId: input.userId,
+      count: input.customers.length,
+      names: input.customers.map((c) => c.name),
+    });
     const added: string[] = [];
     const duplicates: string[] = [];
 
@@ -30,7 +34,9 @@ export const createCustomersTool = tool(
       const existing = db
         .select()
         .from(customers)
-        .where(and(eq(customers.userId, input.userId), eq(customers.name, c.name)))
+        .where(
+          and(eq(customers.userId, input.userId), eq(customers.name, c.name)),
+        )
         .get();
 
       if (existing) {
@@ -54,9 +60,12 @@ export const createCustomersTool = tool(
 
     const parts: string[] = [];
     if (added.length === 1) parts.push(`Customer "${added[0]}" added.`);
-    else if (added.length > 1) parts.push(`${added.length} customers added: ${added.join(", ")}.`);
+    else if (added.length > 1)
+      parts.push(`${added.length} customers added: ${added.join(", ")}.`);
     if (duplicates.length > 0)
-      parts.push(`Already exists (skipped): ${duplicates.join(", ")}. Use update_customer to modify.`);
+      parts.push(
+        `Already exists (skipped): ${duplicates.join(", ")}. Use update_customer to modify.`,
+      );
     if (parts.length === 0) return "All customers already exist.";
     return parts.join("\n");
   },
@@ -74,11 +83,19 @@ export const createCustomersTool = tool(
 
 export const updateCustomerTool = tool(
   async (input) => {
-    logger.info("update_customer called", { userId: input.userId, customerId: input.customerId });
+    logger.info("update_customer called", {
+      userId: input.userId,
+      customerId: input.customerId,
+    });
     const customer = db
       .select()
       .from(customers)
-      .where(and(eq(customers.id, input.customerId), eq(customers.userId, input.userId)))
+      .where(
+        and(
+          eq(customers.id, input.customerId),
+          eq(customers.userId, input.userId),
+        ),
+      )
       .get();
 
     if (!customer) return "Customer not found.";
@@ -113,24 +130,36 @@ export const updateCustomerTool = tool(
 
 export const deleteCustomerTool = tool(
   async (input) => {
-    logger.info("delete_customer called", { userId: input.userId, customerId: input.customerId });
+    logger.info("delete_customer called", {
+      userId: input.userId,
+      customerId: input.customerId,
+    });
     const customer = db
       .select()
       .from(customers)
-      .where(and(eq(customers.id, input.customerId), eq(customers.userId, input.userId)))
+      .where(
+        and(
+          eq(customers.id, input.customerId),
+          eq(customers.userId, input.userId),
+        ),
+      )
       .get();
 
     if (!customer) return "Customer not found.";
 
-    // Get all purchases for this customer
-    const customerPurchases = db
+    // Get all sales for this customer
+    const customersales = db
       .select()
-      .from(purchases)
-      .where(eq(purchases.customerId, input.customerId))
+      .from(sales)
+      .where(eq(sales.customerId, input.customerId))
       .all();
 
     // Get seller info for PDF generation
-    const user = db.select().from(users).where(eq(users.id, input.userId)).get()!;
+    const user = db
+      .select()
+      .from(users)
+      .where(eq(users.id, input.userId))
+      .get()!;
     const seller = {
       name: user.businessName!,
       address: user.address || "",
@@ -141,8 +170,8 @@ export const deleteCustomerTool = tool(
     // Generate backup PDF before deleting
     const backupKey = `BACKUP-${customer.name.replace(/\s+/g, "-")}-${Date.now()}`;
 
-    if (customerPurchases.length > 0) {
-      const invoices = customerPurchases.map((p) => ({
+    if (customersales.length > 0) {
+      const invoices = customersales.map((p) => ({
         invoiceNumber: p.invoiceNumber,
         date: p.date,
         customerName: customer.name,
@@ -159,30 +188,29 @@ export const deleteCustomerTool = tool(
         total: p.total,
       }));
 
-      const pdfBuffer = invoices.length === 1
-        ? await generateInvoicePdf(invoices[0])
-        : await generateBulkInvoicePdf(invoices);
+      const pdfBuffer =
+        invoices.length === 1
+          ? await generateInvoicePdf(invoices[0])
+          : await generateBulkInvoicePdf(invoices);
       storePdf(backupKey, pdfBuffer);
     }
 
-    // Cascade deletes purchases + payments automatically
-    db.delete(customers)
-      .where(eq(customers.id, input.customerId))
-      .run();
+    // Cascade deletes sales + payments automatically
+    db.delete(customers).where(eq(customers.id, input.customerId)).run();
 
-    if (customerPurchases.length > 0) {
-      return `Customer "${customer.name}" deleted along with ${customerPurchases.length} purchase record(s). Sending backup PDF with all invoices: ${backupKey}`;
+    if (customersales.length > 0) {
+      return `Customer "${customer.name}" deleted along with ${customersales.length} sale record(s). Sending backup PDF with all invoices: ${backupKey}`;
     }
 
-    return `Customer "${customer.name}" deleted. No purchase records to back up.`;
+    return `Customer "${customer.name}" deleted. No sale records to back up.`;
   },
   {
     name: "delete_customer",
-    description: `Delete a customer and all their purchase records. ONLY call this AFTER the user has confirmed.
+    description: `Delete a customer and all their sale records. ONLY call this AFTER the user has confirmed.
 Before calling, you MUST:
 1. Search for the customer
-2. Show their details and number of purchase records
-3. Warn: "This will delete the customer and X purchase records. Backup PDFs will be sent before deletion. Confirm? Yes/No"
+2. Show their details and number of sale records
+3. Warn: "This will delete the customer and X sale records. Backup PDFs will be sent before deletion. Confirm? Yes/No"
 4. ONLY on explicit yes → call this tool`,
     schema: z.object({
       userId: z.number().describe("User ID from context"),
@@ -193,7 +221,10 @@ Before calling, you MUST:
 
 export const searchCustomersTool = tool(
   async (input) => {
-    logger.info("search_customers called", { userId: input.userId, query: input.query });
+    logger.info("search_customers called", {
+      userId: input.userId,
+      query: input.query,
+    });
     const results = db
       .select()
       .from(customers)
@@ -209,19 +240,25 @@ export const searchCustomersTool = tool(
       return `No customers found matching "${input.query}". You can create a new customer.`;
     }
 
-    // Include purchase count for each customer
+    // Include sale count for each customer
     if (results.length === 1) {
       const c = results[0];
-      const pCount = db.select({ id: purchases.id }).from(purchases)
-        .where(eq(purchases.customerId, c.id)).all().length;
-      return `Found 1 customer:\n• ID:${c.id} | ${c.name}${c.phone ? ` | Ph: ${c.phone}` : ""}${c.city ? ` | ${c.city}` : ""}${c.gstin ? ` | GSTIN: ${c.gstin}` : ""} | ${pCount} purchase(s)`;
+      const pCount = db
+        .select({ id: sales.id })
+        .from(sales)
+        .where(eq(sales.customerId, c.id))
+        .all().length;
+      return `Found 1 customer:\n• ID:${c.id} | ${c.name}${c.phone ? ` | Ph: ${c.phone}` : ""}${c.city ? ` | ${c.city}` : ""}${c.gstin ? ` | GSTIN: ${c.gstin}` : ""} | ${pCount} sale(s)`;
     }
 
     const list = results
       .map((c) => {
-        const pCount = db.select({ id: purchases.id }).from(purchases)
-          .where(eq(purchases.customerId, c.id)).all().length;
-        return `• ID:${c.id} | ${c.name}${c.phone ? ` | Ph: ${c.phone}` : ""}${c.city ? ` | ${c.city}` : ""}${c.gstin ? ` | GSTIN: ${c.gstin}` : ""} | ${pCount} purchase(s)`;
+        const pCount = db
+          .select({ id: sales.id })
+          .from(sales)
+          .where(eq(sales.customerId, c.id))
+          .all().length;
+        return `• ID:${c.id} | ${c.name}${c.phone ? ` | Ph: ${c.phone}` : ""}${c.city ? ` | ${c.city}` : ""}${c.gstin ? ` | GSTIN: ${c.gstin}` : ""} | ${pCount} sale(s)`;
       })
       .join("\n");
 

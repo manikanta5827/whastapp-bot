@@ -17,8 +17,17 @@ import {
   createInvoiceTool,
   confirmInvoiceTool,
   generateReportTool,
+  listSalesTool,
+  deleteSaleTool,
+  getSummaryTool,
 } from "../tools/invoice.ts";
-import { recordPaymentTool, getBalancesTool } from "../tools/payment.ts";
+import {
+  recordPaymentTool,
+  getBalancesTool,
+  listPaymentsTool,
+  updatePaymentTool,
+  deletePaymentTool,
+} from "../tools/payment.ts";
 import logger from "../logger.ts";
 
 const llm = new ChatOpenAI({
@@ -81,9 +90,15 @@ const mainAgent = createReactAgent({
     searchCustomersTool,
     createInvoiceTool,
     confirmInvoiceTool,
+    listSalesTool,
+    deleteSaleTool,
     recordPaymentTool,
+    listPaymentsTool,
+    updatePaymentTool,
+    deletePaymentTool,
     getBalancesTool,
     generateReportTool,
+    getSummaryTool,
   ],
   stateModifier: new SystemMessage(
     `You are a WhatsApp invoice assistant for Indian businesses.
@@ -96,13 +111,18 @@ NEED confirmation (show details, ask Yes/No, THEN call tool):
 - **Record payment** → show amount + customer → confirm → record_payment
 - **Update customer** → show current + proposed changes → confirm → update_customer
 - **Delete customer** → show details + record count → confirm → delete_customer
+- **Update payment** → show current + proposed changes → confirm → update_payment
+- **Delete payment** → show payment details → confirm → delete_payment
+- **Delete sale** → show invoice details → confirm → delete_sale
 - **Update business details** → show changes → confirm → update_user
 
 NO confirmation needed:
 - **Create customer(s)** → user explicitly asked
 - **Search customers** → read-only
 - **Get balance** → read-only
+- **List sales / List payments** → read-only
 - **Generate report** → read-only, data already saved
+- **Get summary** → read-only
 
 ## RECORDING SALES (preview → confirm → saved + PDF sent)
 1. FIRST call search_customers for the customer name — MANDATORY
@@ -111,12 +131,31 @@ NO confirmation needed:
 4. User says yes → call confirm_invoice → sale saved + PDF sent immediately
 IMPORTANT: If user mentions a specific date like "yesterday", "ninna", "kal", "last Monday" etc., pass the actual YYYY-MM-DD date to create_invoice. Default to today only if no date is mentioned.
 
+## VIEWING SALES
+"Show Raju's bills" / "My sales today" / "All invoices this week":
+- Search customer if mentioned → list_sales with customerId + optional date range
+- No customer → list_sales with just date range or no filter
+
+## DELETING A SALE
+"Delete that invoice" / "Cancel last bill":
+1. List sales first (list_sales) so user can identify which one
+2. Show sale details → confirm → delete_sale
+
 ## RECORDING PAYMENTS
 When user says "Sunrise paid ₹5000 cash" / "Raju paid 2000 UPI":
 1. Search customer first (same disambiguation rules)
 2. Show: "Record ₹5,000 payment from Sunrise (cash) on [date]? Yes/No"
 3. On yes → call record_payment with amount, mode, date
 IMPORTANT: If user mentions a specific date like "yesterday", "ninna" (Telugu), "kal" (Hindi), "last Monday" etc., calculate the actual YYYY-MM-DD date using Today from context. Default to today only if no date is mentioned.
+
+## VIEWING PAYMENTS
+"Show Raju's payments" / "Payments this week":
+- Search customer if mentioned → list_payments with customerId + optional date range
+
+## UPDATING / DELETING PAYMENTS
+"Fix Raju's last payment" / "Delete that payment":
+1. List payments first (list_payments) so user can identify which one
+2. Show details → confirm → update_payment or delete_payment
 
 ## BALANCE CHECK
 - "What does Sunrise owe?" → search customer → get_balances with customerIds: [id]
@@ -130,6 +169,12 @@ Balance = initial + total sales - total payments. Positive = owes, negative = ad
 1. If customer names given → search each, resolve IDs (disambiguation rules apply)
 2. Call generate_report with date range + optional customerIds
 3. Report PDF includes per-customer: opening balance, sales list, payments list, closing balance
+No confirmation needed.
+
+## BUSINESS SUMMARY
+"How's my business today?" / "Summary for this month" / "Dashboard":
+- Call get_summary with date range
+- Shows: total sales, payments, customer count, outstanding dues
 No confirmation needed.
 
 ## CUSTOMER MANAGEMENT

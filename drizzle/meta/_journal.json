@@ -29,6 +29,13 @@
       "when": 1776785425184,
       "tag": "0003_unusual_bushwacker",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1776792147442,
+      "tag": "0004_narrow_payback",
+      "breakpoints": true
     }
   ]
 }

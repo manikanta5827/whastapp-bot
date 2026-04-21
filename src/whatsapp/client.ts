@@ -123,10 +123,10 @@ export async function connectToWhatsApp(retryCount = 0): Promise<void> {
           reply.match(
             /(?:INV-\d{8}-\d{3}|REPORT-\d{4}-\d{2}-\d{2}-to-\d{4}-\d{2}-\d{2}|BACKUP-[\w-]+-\d+)/g,
           ) || [];
-        const pdfs: { key: string; buffer: Buffer }[] = [];
+        const pdfs: { key: string; buffer: Buffer; label?: string }[] = [];
         for (const key of pdfKeys) {
-          const buf = retrievePdf(key);
-          if (buf) pdfs.push({ key, buffer: buf });
+          const entry = retrievePdf(key);
+          if (entry) pdfs.push({ key, buffer: entry.buffer, label: entry.label });
         }
 
         if (pdfs.length > 0) {
@@ -138,7 +138,10 @@ export async function connectToWhatsApp(retryCount = 0): Promise<void> {
             pdfCount: pdfs.length,
           });
           for (const pdf of pdfs) {
-            const fileName = `${pdf.key}.pdf`;
+            const sanitizedLabel = pdf.label?.replace(/[^a-zA-Z0-9\s-]/g, "").replace(/\s+/g, "-");
+            const fileName = sanitizedLabel
+              ? `${pdf.key}-${sanitizedLabel}.pdf`
+              : `${pdf.key}.pdf`;
             await sock.sendMessage(from, {
               document: pdf.buffer,
               mimetype: "application/pdf",
@@ -147,6 +150,7 @@ export async function connectToWhatsApp(retryCount = 0): Promise<void> {
             logger.info("PDF sent", {
               from,
               key: pdf.key,
+              fileName,
               size: pdf.buffer.length,
             });
           }
