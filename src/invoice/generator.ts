@@ -1,20 +1,48 @@
-import { config } from "../config.ts";
+import { eq, like } from "drizzle-orm";
+import { db } from "../db/index.ts";
+import { purchases } from "../db/schema.ts";
 import type { Invoice, InvoiceItem } from "./types.ts";
 
-let invoiceCounter = 0;
-
 function generateInvoiceNumber(): string {
-  invoiceCounter++;
   const date = new Date();
   const dateStr = date.toISOString().slice(0, 10).replace(/-/g, "");
-  const seq = String(invoiceCounter).padStart(3, "0");
-  return `INV-${dateStr}-${seq}`;
+  const prefix = `INV-${dateStr}-`;
+
+  // Find the highest existing invoice number for today
+  const latest = db
+    .select({ invoiceNumber: purchases.invoiceNumber })
+    .from(purchases)
+    .where(like(purchases.invoiceNumber, `${prefix}%`))
+    .all();
+
+  let maxSeq = 0;
+  for (const row of latest) {
+    const seq = parseInt(row.invoiceNumber.slice(-3), 10);
+    if (seq > maxSeq) maxSeq = seq;
+  }
+
+  const seq = String(maxSeq + 1).padStart(3, "0");
+  return `${prefix}${seq}`;
+}
+
+export interface SellerInfo {
+  name: string;
+  address: string;
+  gstin: string;
+  phone: string;
+}
+
+export interface CustomerInfo {
+  name: string;
+  phone?: string;
+  address?: string;
+  gstin?: string;
 }
 
 export function createInvoice(
-  customerName: string,
+  seller: SellerInfo,
+  customer: CustomerInfo,
   items: InvoiceItem[],
-  customerPhone?: string,
 ): Invoice {
   let subtotal = 0;
   let totalGst = 0;
@@ -33,11 +61,14 @@ export function createInvoice(
       month: "short",
       year: "numeric",
     }),
-    customerName,
-    customerPhone,
-    sellerName: config.seller.name,
-    sellerAddress: config.seller.address,
-    sellerGstin: config.seller.gstin,
+    customerName: customer.name,
+    customerPhone: customer.phone,
+    customerAddress: customer.address,
+    customerGstin: customer.gstin,
+    sellerName: seller.name,
+    sellerAddress: seller.address,
+    sellerGstin: seller.gstin,
+    sellerPhone: seller.phone,
     items,
     subtotal,
     totalGst,

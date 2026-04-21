@@ -11,9 +11,12 @@ export interface Invoice {
   date: string
   customerName: string
   customerPhone?: string
+  customerAddress?: string
+  customerGstin?: string
   sellerName: string
   sellerAddress: string
   sellerGstin: string
+  sellerPhone: string
   items: InvoiceItem[]
   subtotal: number
   totalGst: number

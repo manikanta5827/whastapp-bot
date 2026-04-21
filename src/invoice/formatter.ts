@@ -23,6 +23,7 @@ export function formatInvoiceForWhatsApp(invoice: Invoice): string {
   }
   if (invoice.sellerAddress) lines.push(invoice.sellerAddress);
   if (invoice.sellerGstin) lines.push(`GSTIN: ${invoice.sellerGstin}`);
+  if (invoice.sellerPhone) lines.push(`Phone: ${invoice.sellerPhone}`);
 
   lines.push("");
   lines.push(`*Invoice:* ${invoice.invoiceNumber}`);
@@ -32,8 +33,10 @@ export function formatInvoiceForWhatsApp(invoice: Invoice): string {
   lines.push("");
   lines.push(`*Bill To:* ${invoice.customerName}`);
   if (invoice.customerPhone) lines.push(`Phone: ${invoice.customerPhone}`);
+  if (invoice.customerAddress) lines.push(invoice.customerAddress);
+  if (invoice.customerGstin) lines.push(`GSTIN: ${invoice.customerGstin}`);
 
-  // Items — one block per item, no column alignment
+  // Items
   lines.push("");
   lines.push("▸ *Items*");
   lines.push("─────────────────");

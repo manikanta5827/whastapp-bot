@@ -52,6 +52,10 @@ export async function generateInvoicePdf(
       doc.text(`GSTIN: ${invoice.sellerGstin}`, leftX, y);
       y += 13;
     }
+    if (invoice.sellerPhone) {
+      doc.text(`Phone: ${invoice.sellerPhone}`, leftX, y);
+      y += 13;
+    }
 
     // Invoice number and date on the right
     doc
@@ -78,6 +82,14 @@ export async function generateInvoicePdf(
     y += 14;
     if (invoice.customerPhone) {
       doc.text(`Phone: ${invoice.customerPhone}`, leftX, y);
+      y += 14;
+    }
+    if (invoice.customerAddress) {
+      doc.text(invoice.customerAddress, leftX, y);
+      y += 14;
+    }
+    if (invoice.customerGstin) {
+      doc.text(`GSTIN: ${invoice.customerGstin}`, leftX, y);
       y += 14;
     }
 

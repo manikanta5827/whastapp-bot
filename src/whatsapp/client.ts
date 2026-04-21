@@ -106,17 +106,34 @@ export async function connectToWhatsApp(retryCount = 0): Promise<void> {
       try {
         const reply = await processMessage(sender, text)
 
-        const invoiceMatch = reply.match(/INV-\d{8}-\d{3}/)
-        const pdfBuffer = invoiceMatch ? retrievePdf(invoiceMatch[0]) : undefined
+        // Find all invoice numbers in the reply (supports bulk report)
+        const invoiceMatches = reply.match(/INV-\d{8}-\d{3}/g) || []
+        const pdfs: { number: string; buffer: Buffer }[] = []
+        for (const invNum of invoiceMatches) {
+          const buf = retrievePdf(invNum)
+          if (buf) pdfs.push({ number: invNum, buffer: buf })
+        }
 
-        if (pdfBuffer) {
+        if (pdfs.length === 1) {
+          // Single invoice — send as document with caption
           await sock.sendMessage(from, {
-            document: pdfBuffer,
+            document: pdfs[0].buffer,
             mimetype: 'application/pdf',
-            fileName: `${invoiceMatch![0]}.pdf`,
+            fileName: `${pdfs[0].number}.pdf`,
             caption: reply,
           }, { quoted: msg })
-          console.log(`[${from}] bot: [sent PDF ${invoiceMatch![0]}]`)
+          console.log(`[${from}] bot: [sent PDF ${pdfs[0].number}]`)
+        } else if (pdfs.length > 1) {
+          // Bulk — send text first, then each PDF
+          await sock.sendMessage(from, { text: reply }, { quoted: msg })
+          for (const pdf of pdfs) {
+            await sock.sendMessage(from, {
+              document: pdf.buffer,
+              mimetype: 'application/pdf',
+              fileName: `${pdf.number}.pdf`,
+            })
+            console.log(`[${from}] bot: [sent PDF ${pdf.number}]`)
+          }
         } else {
           await sock.sendMessage(from, { text: reply }, { quoted: msg })
           console.log(`[${from}] bot: ${reply}`)
