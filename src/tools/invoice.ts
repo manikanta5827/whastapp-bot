@@ -13,6 +13,7 @@ import { generateInvoicePdf } from "../invoice/pdf.ts";
 import { generateReportPdf, type CustomerReport } from "../invoice/report.ts";
 import { storePdf } from "../invoice/pdfStore.ts";
 import { storePending, retrievePending } from "../invoice/pendingStore.ts";
+import logger from "../logger.ts";
 
 const invoiceItemSchema = z.object({
   description: z
@@ -65,16 +66,19 @@ function getCustomerInfo(
 
 export const createInvoiceTool = tool(
   async (input) => {
+    logger.info("create_invoice called", { userId: input.userId, customerId: input.customerId, itemCount: input.items.length });
     const seller = getSellerInfo(input.userId);
     const customer = getCustomerInfo(input.userId, input.customerId);
     if (!customer)
       return "Customer not found. Please search for the customer first.";
 
-    const invoice = createInvoice(seller, customer, input.items);
+    const invoice = createInvoice(seller, customer, input.items, input.date);
     storePending(invoice.invoiceNumber, {
       ...invoice,
       _customerId: input.customerId,
+      _date: input.date || new Date().toISOString().slice(0, 10),
     } as any);
+    logger.info("Invoice preview created", { invoiceNumber: invoice.invoiceNumber, customerId: input.customerId, total: invoice.total, date: input.date });
 
     const formatted = formatInvoiceForWhatsApp(invoice);
     return `Here is the sale preview:\n\n${formatted}\n\nConfirm to record this sale? *Yes* / *No*\nInvoice: ${invoice.invoiceNumber}`;
@@ -94,23 +98,30 @@ This creates a PREVIEW only. The sale is recorded in DB after user confirms. NO 
       items: z
         .array(invoiceItemSchema)
         .describe("List of items/services for the invoice"),
+      date: z
+        .string()
+        .optional()
+        .describe("Sale date YYYY-MM-DD. Use if user specifies a date (e.g. 'yesterday', 'last Monday'). Defaults to today."),
     }),
   },
 );
 
 export const confirmInvoiceTool = tool(
   async (input) => {
+    logger.info("confirm_invoice called", { userId: input.userId, invoiceNumber: input.invoiceNumber });
     const pending = retrievePending(input.invoiceNumber) as any;
-    if (!pending)
+    if (!pending) {
+      logger.warn("Invoice not found or already confirmed", { invoiceNumber: input.invoiceNumber });
       return `Invoice ${input.invoiceNumber} not found or already confirmed.`;
+    }
 
-    const { _customerId, ...invoice } = pending;
+    const { _customerId, _date, ...invoice } = pending;
 
     // Generate PDF first — if this fails, don't save the purchase
     const pdfBuffer = await generateInvoicePdf(invoice);
 
-    // Record purchase in DB
-    const today = new Date().toISOString().slice(0, 10);
+    // Record purchase in DB — use the date from when the invoice was created
+    const purchaseDate = _date || new Date().toISOString().slice(0, 10);
     db.insert(purchases)
       .values({
         invoiceNumber: invoice.invoiceNumber,
@@ -120,12 +131,13 @@ export const confirmInvoiceTool = tool(
         subtotal: invoice.subtotal,
         totalGst: invoice.totalGst,
         total: invoice.total,
-        date: today,
+        date: purchaseDate,
       })
       .run();
 
     // Store PDF for WhatsApp sender to pick up
     storePdf(invoice.invoiceNumber, pdfBuffer);
+    logger.info("Invoice confirmed and PDF generated", { invoiceNumber: invoice.invoiceNumber, total: invoice.total, pdfSize: pdfBuffer.length });
 
     return `Sale recorded and invoice PDF generated! ${invoice.invoiceNumber} — ${invoice.customerName}, ₹${invoice.total.toFixed(2)}.`;
   },
@@ -143,6 +155,7 @@ export const confirmInvoiceTool = tool(
 
 export const generateReportTool = tool(
   async (input) => {
+    logger.info("generate_report called", { userId: input.userId, fromDate: input.fromDate, toDate: input.toDate, customerIds: input.customerIds });
     const seller = getSellerInfo(input.userId);
 
     // Determine which customers to include
@@ -284,6 +297,7 @@ export const generateReportTool = tool(
     });
 
     storePdf(reportId, pdfBuffer);
+    logger.info("Report PDF generated", { reportId, customerCount: customerReports.length, pdfSize: pdfBuffer.length });
 
     const summaryLines = customerReports.map(
       (c) => `• ${c.customerName}: Sales ₹${c.totalSales.toFixed(2)}, Payments ₹${c.totalPayments.toFixed(2)}, Balance ₹${c.closingBalance.toFixed(2)}${c.closingBalance > 0 ? " (owes)" : c.closingBalance < 0 ? " (advance)" : " (settled)"}`,

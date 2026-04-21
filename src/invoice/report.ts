@@ -1,38 +1,13 @@
-import PDFDocument from "pdfkit";
 import type { InvoiceItem } from "./types.ts";
-
-function formatCurrency(amount: number): string {
-  return (
-    "Rs. " +
-    amount.toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })
-  );
-}
-
-const LEFT_X = 50;
-const ROW_HEIGHT = 16;
-
-function getRightX(doc: PDFKit.PDFDocument): number {
-  return doc.page.width - 50;
-}
-
-function getPageWidth(doc: PDFKit.PDFDocument): number {
-  return doc.page.width - 100;
-}
-
-function getPageBottom(doc: PDFKit.PDFDocument): number {
-  return doc.page.height - 50;
-}
-
-function checkPage(doc: PDFKit.PDFDocument, y: number, needed: number): number {
-  if (y + needed > getPageBottom(doc)) {
-    doc.addPage();
-    return 50;
-  }
-  return y;
-}
+import {
+  LEFT_X,
+  ROW_HEIGHT,
+  formatCurrencyPdf as fmt,
+  getRightX,
+  getPageWidth,
+  checkPage,
+  docToBuffer,
+} from "./pdfHelpers.ts";
 
 export interface SaleRecord {
   invoiceNumber: string;
@@ -94,9 +69,12 @@ function renderCustomerReport(
     });
     y += 13;
     if (opts.sellerGstin) {
-      doc.text(`GSTIN: ${opts.sellerGstin} | Phone: ${opts.sellerPhone}`, LEFT_X, y, {
-        align: "center",
-      });
+      doc.text(
+        `GSTIN: ${opts.sellerGstin} | Phone: ${opts.sellerPhone}`,
+        LEFT_X,
+        y,
+        { align: "center" },
+      );
       y += 13;
     }
     doc.text(`Period: ${opts.fromDate} to ${opts.toDate}`, LEFT_X, y, {
@@ -104,19 +82,12 @@ function renderCustomerReport(
     });
     y += 18;
 
-    doc
-      .moveTo(LEFT_X, y)
-      .lineTo(rightX, y)
-      .lineWidth(2)
-      .stroke();
+    doc.moveTo(LEFT_X, y).lineTo(rightX, y).lineWidth(2).stroke();
     y += 15;
   }
 
   // --- Customer Header ---
-  doc
-    .fontSize(13)
-    .font("Helvetica-Bold")
-    .text(customer.customerName, LEFT_X, y);
+  doc.fontSize(13).font("Helvetica-Bold").text(customer.customerName, LEFT_X, y);
   y += 16;
 
   doc.fontSize(9).font("Helvetica");
@@ -131,11 +102,7 @@ function renderCustomerReport(
   y += 5;
 
   // --- Opening Balance ---
-  doc
-    .moveTo(LEFT_X, y)
-    .lineTo(rightX, y)
-    .lineWidth(0.5)
-    .stroke();
+  doc.moveTo(LEFT_X, y).lineTo(rightX, y).lineWidth(0.5).stroke();
   y += 8;
 
   doc
@@ -143,7 +110,7 @@ function renderCustomerReport(
     .font("Helvetica-Bold")
     .text("Opening Balance:", LEFT_X, y, { continued: true })
     .font("Helvetica")
-    .text(`  ${formatCurrency(customer.openingBalance)}`, { align: "right" });
+    .text(`  ${fmt(customer.openingBalance)}`, { align: "right" });
   y += 18;
 
   // --- Sales Section ---
@@ -152,7 +119,6 @@ function renderCustomerReport(
     doc.fontSize(11).font("Helvetica-Bold").text("Sales", LEFT_X, y);
     y += 16;
 
-    // Sales table header
     doc.rect(LEFT_X, y, pageWidth, 18).fill("#f0f0f0");
     doc.fillColor("#000000").fontSize(8).font("Helvetica-Bold");
     y += 4;
@@ -173,17 +139,14 @@ function renderCustomerReport(
       doc.text(sale.date, LEFT_X + 5, y, { width: 75 });
       doc.text(sale.invoiceNumber, LEFT_X + 80, y, { width: 100 });
       doc.text(itemSummary, LEFT_X + 180, y, { width: 180 });
-      doc.text(formatCurrency(sale.total), LEFT_X + 370, y, {
-        width: 75,
-        align: "right",
-      });
+      doc.text(fmt(sale.total), LEFT_X + 370, y, { width: 75, align: "right" });
       y += ROW_HEIGHT;
     }
 
     y += 4;
     doc.fontSize(9).font("Helvetica-Bold");
     doc.text("Total Sales:", LEFT_X + 280, y, { width: 90, align: "right" });
-    doc.text(formatCurrency(customer.totalSales), LEFT_X + 370, y, {
+    doc.text(fmt(customer.totalSales), LEFT_X + 370, y, {
       width: 75,
       align: "right",
     });
@@ -196,7 +159,6 @@ function renderCustomerReport(
     doc.fontSize(11).font("Helvetica-Bold").text("Payments", LEFT_X, y);
     y += 16;
 
-    // Payments table header
     doc.rect(LEFT_X, y, pageWidth, 18).fill("#e8f5e9");
     doc.fillColor("#000000").fontSize(8).font("Helvetica-Bold");
     y += 4;
@@ -213,10 +175,7 @@ function renderCustomerReport(
       doc.text(pmt.date, LEFT_X + 5, y, { width: 80 });
       doc.text(pmt.mode || "-", LEFT_X + 90, y, { width: 80 });
       doc.text(pmt.note || "-", LEFT_X + 180, y, { width: 180 });
-      doc.text(formatCurrency(pmt.amount), LEFT_X + 370, y, {
-        width: 75,
-        align: "right",
-      });
+      doc.text(fmt(pmt.amount), LEFT_X + 370, y, { width: 75, align: "right" });
       y += ROW_HEIGHT;
     }
 
@@ -226,7 +185,7 @@ function renderCustomerReport(
       width: 90,
       align: "right",
     });
-    doc.text(formatCurrency(customer.totalPayments), LEFT_X + 370, y, {
+    doc.text(fmt(customer.totalPayments), LEFT_X + 370, y, {
       width: 75,
       align: "right",
     });
@@ -235,11 +194,7 @@ function renderCustomerReport(
 
   // --- Closing Balance ---
   y = checkPage(doc, y, 40);
-  doc
-    .moveTo(LEFT_X, y)
-    .lineTo(rightX, y)
-    .lineWidth(1)
-    .stroke();
+  doc.moveTo(LEFT_X, y).lineTo(rightX, y).lineWidth(1).stroke();
   y += 10;
 
   doc.fontSize(12).font("Helvetica-Bold");
@@ -249,34 +204,18 @@ function renderCustomerReport(
       : customer.closingBalance < 0
         ? "Advance"
         : "Settled";
-  doc.text(`${balanceLabel}:`, LEFT_X + 280, y, {
-    width: 90,
+  doc.text(`${balanceLabel}:`, LEFT_X + 280, y, { width: 90, align: "right" });
+  doc.text(fmt(Math.abs(customer.closingBalance)), LEFT_X + 370, y, {
+    width: 75,
     align: "right",
   });
-  doc.text(
-    formatCurrency(Math.abs(customer.closingBalance)),
-    LEFT_X + 370,
-    y,
-    { width: 75, align: "right" },
-  );
 }
 
-export async function generateReportPdf(
-  opts: ReportOptions,
-): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: "A4", margin: 50 });
-    const chunks: Uint8Array[] = [];
-
-    doc.on("data", (chunk: Uint8Array) => chunks.push(chunk));
-    doc.on("end", () => resolve(Buffer.concat(chunks)));
-    doc.on("error", reject);
-
+export async function generateReportPdf(opts: ReportOptions): Promise<Buffer> {
+  return docToBuffer((doc) => {
     for (let i = 0; i < opts.customers.length; i++) {
       if (i > 0) doc.addPage();
       renderCustomerReport(doc, opts.customers[i], opts, i === 0);
     }
-
-    doc.end();
   });
 }

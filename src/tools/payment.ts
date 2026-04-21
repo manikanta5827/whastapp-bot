@@ -3,6 +3,7 @@ import { z } from "zod";
 import { and, eq, lt, lte, between, inArray, sql } from "drizzle-orm";
 import { db } from "../db/index.ts";
 import { customers, purchases, payments } from "../db/schema.ts";
+import logger from "../logger.ts";
 
 function getBalance(customerId: number, upToDate?: string) {
   const customer = db
@@ -37,6 +38,7 @@ function getBalance(customerId: number, upToDate?: string) {
 
 export const recordPaymentTool = tool(
   async (input) => {
+    logger.info("record_payment called", { userId: input.userId, customerId: input.customerId, amount: input.amount, mode: input.mode, date: input.date });
     db.insert(payments)
       .values({
         userId: input.userId,
@@ -73,13 +75,14 @@ export const recordPaymentTool = tool(
         .optional()
         .describe('Payment mode: "cash", "upi", "bank", "cheque", etc.'),
       note: z.string().optional().describe("Optional note about the payment"),
-      date: z.string().describe("Payment date YYYY-MM-DD (use today from context)"),
+      date: z.string().describe("Payment date YYYY-MM-DD. Use the date user mentions (e.g. 'yesterday', 'last week'). Default to today from context if not specified."),
     }),
   },
 );
 
 export const getBalancesTool = tool(
   async (input) => {
+    logger.info("get_balances called", { userId: input.userId, customerIds: input.customerIds, asOfDate: input.asOfDate });
     // Determine which customers
     let customerRows;
     if (input.customerIds?.length) {

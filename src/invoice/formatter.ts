@@ -1,14 +1,5 @@
 import type { Invoice } from "./types.ts";
-
-function formatCurrency(amount: number): string {
-  return (
-    "₹" +
-    amount.toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })
-  );
-}
+import { formatCurrencyWhatsApp as fmt } from "./pdfHelpers.ts";
 
 export function formatInvoiceForWhatsApp(invoice: Invoice): string {
   const lines: string[] = [];
@@ -45,26 +36,24 @@ export function formatInvoiceForWhatsApp(invoice: Invoice): string {
     const item = invoice.items[i];
     const amount = item.quantity * item.rate;
 
+    lines.push(`${i + 1}. ${item.description}`);
     lines.push(
-      `${i + 1}. ${item.description}`,
-    );
-    lines.push(
-      `    ${item.quantity} ${item.unit} × ${formatCurrency(item.rate)} = ${formatCurrency(amount)}`,
+      `    ${item.quantity} ${item.unit} × ${fmt(item.rate)} = ${fmt(amount)}`,
     );
 
     if (item.gstPercent > 0) {
       const gstAmount = (amount * item.gstPercent) / 100;
-      lines.push(`    _+ GST ${item.gstPercent}%: ${formatCurrency(gstAmount)}_`);
+      lines.push(`    _+ GST ${item.gstPercent}%: ${fmt(gstAmount)}_`);
     }
   }
 
   // Totals
   lines.push("─────────────────");
-  lines.push(`Subtotal: ${formatCurrency(invoice.subtotal)}`);
+  lines.push(`Subtotal: ${fmt(invoice.subtotal)}`);
   if (invoice.totalGst > 0) {
-    lines.push(`GST: ${formatCurrency(invoice.totalGst)}`);
+    lines.push(`GST: ${fmt(invoice.totalGst)}`);
   }
-  lines.push(`*Total: ${formatCurrency(invoice.total)}*`);
+  lines.push(`*Total: ${fmt(invoice.total)}*`);
 
   return lines.join("\n");
 }

@@ -5,6 +5,7 @@ import { db } from "../db/index.ts";
 import { users, customers, purchases, payments } from "../db/schema.ts";
 import { generateInvoicePdf, generateBulkInvoicePdf } from "../invoice/pdf.ts";
 import { storePdf } from "../invoice/pdfStore.ts";
+import logger from "../logger.ts";
 
 const customerSchema = z.object({
   name: z.string().describe("Customer name"),
@@ -21,6 +22,7 @@ const customerSchema = z.object({
 
 export const createCustomersTool = tool(
   async (input) => {
+    logger.info("create_customers called", { userId: input.userId, count: input.customers.length, names: input.customers.map(c => c.name) });
     const added: string[] = [];
     const duplicates: string[] = [];
 
@@ -72,6 +74,7 @@ export const createCustomersTool = tool(
 
 export const updateCustomerTool = tool(
   async (input) => {
+    logger.info("update_customer called", { userId: input.userId, customerId: input.customerId });
     const customer = db
       .select()
       .from(customers)
@@ -110,6 +113,7 @@ export const updateCustomerTool = tool(
 
 export const deleteCustomerTool = tool(
   async (input) => {
+    logger.info("delete_customer called", { userId: input.userId, customerId: input.customerId });
     const customer = db
       .select()
       .from(customers)
@@ -189,6 +193,7 @@ Before calling, you MUST:
 
 export const searchCustomersTool = tool(
   async (input) => {
+    logger.info("search_customers called", { userId: input.userId, query: input.query });
     const results = db
       .select()
       .from(customers)

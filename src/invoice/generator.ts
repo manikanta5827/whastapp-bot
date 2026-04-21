@@ -43,6 +43,7 @@ export function createInvoice(
   seller: SellerInfo,
   customer: CustomerInfo,
   items: InvoiceItem[],
+  date?: string,
 ): Invoice {
   let subtotal = 0;
   let totalGst = 0;
@@ -54,13 +55,21 @@ export function createInvoice(
     totalGst += itemGst;
   }
 
+  const invoiceDate = date
+    ? new Date(date + "T00:00:00").toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : new Date().toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      });
+
   return {
     invoiceNumber: generateInvoiceNumber(),
-    date: new Date().toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    }),
+    date: invoiceDate,
     customerName: customer.name,
     customerPhone: customer.phone,
     customerAddress: customer.address,

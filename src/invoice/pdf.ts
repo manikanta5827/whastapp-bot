@@ -1,30 +1,13 @@
-import PDFDocument from "pdfkit";
 import type { Invoice } from "./types.ts";
-
-function formatCurrency(amount: number): string {
-  return (
-    "Rs. " +
-    amount.toLocaleString("en-IN", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })
-  );
-}
-
-const LEFT_X = 50;
-const ROW_HEIGHT = 18;
-
-function getPageBottom(doc: PDFKit.PDFDocument): number {
-  return doc.page.height - 50; // bottom margin
-}
-
-function getRightX(doc: PDFKit.PDFDocument): number {
-  return doc.page.width - 50;
-}
-
-function getPageWidth(doc: PDFKit.PDFDocument): number {
-  return doc.page.width - 100;
-}
+import {
+  LEFT_X,
+  ROW_HEIGHT,
+  formatCurrencyPdf as fmt,
+  getRightX,
+  getPageWidth,
+  getPageBottom,
+  docToBuffer,
+} from "./pdfHelpers.ts";
 
 function getCols() {
   return {
@@ -40,9 +23,8 @@ function getCols() {
 
 function drawTableHeader(doc: PDFKit.PDFDocument, y: number): number {
   const cols = getCols();
-  const pageWidth = getPageWidth(doc);
 
-  doc.rect(LEFT_X, y, pageWidth, 20).fill("#f0f0f0");
+  doc.rect(LEFT_X, y, getPageWidth(doc), 20).fill("#f0f0f0");
   doc.fillColor("#000000").fontSize(9).font("Helvetica-Bold");
   y += 5;
   doc.text("#", cols.sno, y, { width: 30 });
@@ -86,7 +68,6 @@ function drawContinuationHeader(
 
 function renderInvoice(doc: PDFKit.PDFDocument, invoice: Invoice): void {
   const rightX = getRightX(doc);
-  const pageWidth = getPageWidth(doc);
   const pageBottom = getPageBottom(doc);
 
   // --- Header ---
@@ -95,11 +76,7 @@ function renderInvoice(doc: PDFKit.PDFDocument, invoice: Invoice): void {
     .font("Helvetica-Bold")
     .text("TAX INVOICE", LEFT_X, 50, { align: "center" });
 
-  doc
-    .moveTo(LEFT_X, 80)
-    .lineTo(rightX, 80)
-    .lineWidth(2)
-    .stroke();
+  doc.moveTo(LEFT_X, 80).lineTo(rightX, 80).lineWidth(2).stroke();
 
   // --- Seller Info (left) + Invoice Meta (right) ---
   let y = 95;
@@ -120,7 +97,6 @@ function renderInvoice(doc: PDFKit.PDFDocument, invoice: Invoice): void {
     y += 13;
   }
 
-  // Invoice number and date on the right
   doc
     .fontSize(10)
     .font("Helvetica-Bold")
@@ -132,11 +108,7 @@ function renderInvoice(doc: PDFKit.PDFDocument, invoice: Invoice): void {
 
   // --- Customer Info ---
   y = Math.max(y, 130) + 10;
-  doc
-    .moveTo(LEFT_X, y)
-    .lineTo(rightX, y)
-    .lineWidth(0.5)
-    .stroke();
+  doc.moveTo(LEFT_X, y).lineTo(rightX, y).lineWidth(0.5).stroke();
   y += 10;
 
   doc.fontSize(10).font("Helvetica-Bold").text("Bill To:", LEFT_X, y);
@@ -162,10 +134,8 @@ function renderInvoice(doc: PDFKit.PDFDocument, invoice: Invoice): void {
   const cols = getCols();
   y = drawTableHeader(doc, y);
 
-  // Table rows with page overflow handling
   doc.font("Helvetica").fontSize(9);
   for (let i = 0; i < invoice.items.length; i++) {
-    // Check if we need a new page for this row
     if (y + ROW_HEIGHT > pageBottom) {
       doc.addPage();
       y = drawContinuationHeader(doc, invoice);
@@ -177,7 +147,7 @@ function renderInvoice(doc: PDFKit.PDFDocument, invoice: Invoice): void {
     const amount = item.quantity * item.rate;
 
     if (i % 2 === 1) {
-      doc.rect(LEFT_X, y - 3, pageWidth, ROW_HEIGHT).fill("#fafafa");
+      doc.rect(LEFT_X, y - 3, getPageWidth(doc), ROW_HEIGHT).fill("#fafafa");
       doc.fillColor("#000000");
     }
 
@@ -185,35 +155,21 @@ function renderInvoice(doc: PDFKit.PDFDocument, invoice: Invoice): void {
     doc.text(item.description, cols.desc, y, { width: 180 });
     doc.text(`${item.quantity}`, cols.qty, y, { width: 45, align: "right" });
     doc.text(item.unit, cols.unit, y, { width: 35, align: "center" });
-    doc.text(formatCurrency(item.rate), cols.rate, y, {
-      width: 75,
-      align: "right",
-    });
-    doc.text(`${item.gstPercent}%`, cols.gst, y, {
-      width: 35,
-      align: "right",
-    });
-    doc.text(formatCurrency(amount), cols.amount, y, {
-      width: 65,
-      align: "right",
-    });
+    doc.text(fmt(item.rate), cols.rate, y, { width: 75, align: "right" });
+    doc.text(`${item.gstPercent}%`, cols.gst, y, { width: 35, align: "right" });
+    doc.text(fmt(amount), cols.amount, y, { width: 65, align: "right" });
     y += ROW_HEIGHT;
   }
 
-  // --- Totals (need ~60px of space) ---
+  // --- Totals ---
   const totalsHeight = 60 + (invoice.totalGst > 0 ? 16 : 0);
   if (y + totalsHeight > pageBottom) {
     doc.addPage();
     y = drawContinuationHeader(doc, invoice);
   }
 
-  // Line below items
   y += 5;
-  doc
-    .moveTo(LEFT_X, y)
-    .lineTo(rightX, y)
-    .lineWidth(1)
-    .stroke();
+  doc.moveTo(LEFT_X, y).lineTo(rightX, y).lineWidth(1).stroke();
   y += 12;
 
   const labelX = cols.rate;
@@ -221,70 +177,36 @@ function renderInvoice(doc: PDFKit.PDFDocument, invoice: Invoice): void {
 
   doc.fontSize(10).font("Helvetica");
   doc.text("Subtotal:", labelX, y, { width: 75, align: "right" });
-  doc.text(formatCurrency(invoice.subtotal), valueX, y, {
-    width: 65,
-    align: "right",
-  });
+  doc.text(fmt(invoice.subtotal), valueX, y, { width: 65, align: "right" });
   y += 16;
 
   if (invoice.totalGst > 0) {
     doc.text("GST:", labelX, y, { width: 75, align: "right" });
-    doc.text(formatCurrency(invoice.totalGst), valueX, y, {
-      width: 65,
-      align: "right",
-    });
+    doc.text(fmt(invoice.totalGst), valueX, y, { width: 65, align: "right" });
     y += 16;
   }
 
-  doc
-    .moveTo(labelX, y)
-    .lineTo(rightX, y)
-    .lineWidth(1)
-    .stroke();
+  doc.moveTo(labelX, y).lineTo(rightX, y).lineWidth(1).stroke();
   y += 8;
 
   doc.fontSize(12).font("Helvetica-Bold");
   doc.text("Total:", labelX, y, { width: 75, align: "right" });
-  doc.text(formatCurrency(invoice.total), valueX, y, {
-    width: 65,
-    align: "right",
-  });
+  doc.text(fmt(invoice.total), valueX, y, { width: 65, align: "right" });
 }
 
 /** Generate a single-invoice PDF */
-export async function generateInvoicePdf(
-  invoice: Invoice,
-): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: "A4", margin: 50 });
-    const chunks: Uint8Array[] = [];
-
-    doc.on("data", (chunk: Uint8Array) => chunks.push(chunk));
-    doc.on("end", () => resolve(Buffer.concat(chunks)));
-    doc.on("error", reject);
-
-    renderInvoice(doc, invoice);
-    doc.end();
-  });
+export async function generateInvoicePdf(invoice: Invoice): Promise<Buffer> {
+  return docToBuffer((doc) => renderInvoice(doc, invoice));
 }
 
 /** Generate a combined PDF with multiple invoices (each starts on a new page) */
 export async function generateBulkInvoicePdf(
   invoices: Invoice[],
 ): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ size: "A4", margin: 50 });
-    const chunks: Uint8Array[] = [];
-
-    doc.on("data", (chunk: Uint8Array) => chunks.push(chunk));
-    doc.on("end", () => resolve(Buffer.concat(chunks)));
-    doc.on("error", reject);
-
+  return docToBuffer((doc) => {
     for (let i = 0; i < invoices.length; i++) {
       if (i > 0) doc.addPage();
       renderInvoice(doc, invoices[i]);
     }
-
-    doc.end();
   });
 }

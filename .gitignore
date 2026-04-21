@@ -3,3 +3,8 @@ dist/
 auth_info_baileys/
 .env
 bot.db
+
+
+*.log
+
+/logs

@@ -1,4 +1,5 @@
 import { connectToWhatsApp } from "./whatsapp/client.ts";
+import logger from "./logger.ts";
 
-console.log("Starting WhatsApp Invoice Bot...");
+logger.info("Starting WhatsApp Invoice Bot...");
 connectToWhatsApp();

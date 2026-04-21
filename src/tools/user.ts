@@ -3,9 +3,11 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { db } from "../db/index.ts";
 import { users } from "../db/schema.ts";
+import logger from "../logger.ts";
 
 export const registerUserTool = tool(
   async (input) => {
+    logger.info("register_user called", { userId: input.userId, businessName: input.businessName, proprietorName: input.proprietorName });
     db.update(users)
       .set({
         businessName: input.businessName,
@@ -17,6 +19,7 @@ export const registerUserTool = tool(
       .where(eq(users.id, input.userId))
       .run();
 
+    logger.info("User registered successfully", { userId: input.userId });
     return `Business registered: ${input.businessName} (${input.proprietorName}), Phone: ${input.businessPhone}. You can now create customers and invoices!`;
   },
   {
@@ -35,6 +38,7 @@ export const registerUserTool = tool(
 
 export const setLanguageTool = tool(
   async (input) => {
+    logger.info("set_language called", { userId: input.userId, language: input.language });
     db.update(users)
       .set({ language: input.language })
       .where(eq(users.id, input.userId))
@@ -56,6 +60,7 @@ export const setLanguageTool = tool(
 
 export const updateUserTool = tool(
   async (input) => {
+    logger.info("update_user called", { userId: input.userId });
     const user = db.select().from(users).where(eq(users.id, input.userId)).get();
     if (!user) return "User not found.";
 
